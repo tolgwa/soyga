@@ -62,41 +62,46 @@ txt.TextYAlignment=Enum.TextYAlignment.Center
 -------------------------------------------------
 -- Noclip System
 -------------------------------------------------
+local original = {}
 local n,c=false,nil
 
-local function set(s)
-	n=s
-	stroke.Color=n and Color3.fromRGB(0,255,120) or Color3.fromRGB(70,70,70)
+local function applyNoclip(state)
+	n = state
+	stroke.Color = n and Color3.fromRGB(0,255,120) or Color3.fromRGB(70,70,70)
+
 	if c then c:Disconnect() end
 
 	if n then
-		c=r.Stepped:Connect(function()
+		c = r.Stepped:Connect(function()
 			if p.Character then
 				for _,v in ipairs(p.Character:GetDescendants()) do
 					if v:IsA("BasePart") then
-						v.CanCollide=false
+						if original[v] == nil then
+							original[v] = v.CanCollide -- eski değeri kaydet
+						end
+						v.CanCollide = false
 					end
 				end
 			end
 		end)
 	else
-		if p.Character then
-			for _,v in ipairs(p.Character:GetDescendants()) do
-				if v:IsA("BasePart") then
-					v.CanCollide=true
-				end
+		-- eski haline geri döndür
+		for part,collide in pairs(original) do
+			if part and part.Parent then
+				part.CanCollide = collide
 			end
 		end
+		original = {}
 	end
 end
 
 b.MouseButton1Click:Connect(function()
-	set(not n)
+	applyNoclip(not n)
 end)
 
 u.InputBegan:Connect(function(i,gp)
 	if not gp and i.KeyCode==Enum.KeyCode.V then
-		set(not n)
+		applyNoclip(not n)
 	end
 end)
 
