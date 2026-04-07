@@ -105,4 +105,39 @@ u.InputBegan:Connect(function(i,gp)
 	end
 end)
 
+--fisch
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Skibidiking123/Fisch1/refs/heads/main/FischMain"))()
+
+--fps
+local uis = game:GetService("UserInputService")
+
+-- Ayarlar
+local FOCUSED_FPS = 144
+local UNFOCUSED_FPS = 30
+
+local FOCUSED_QUALITY = Enum.QualityLevel.Level21 -- maksimum
+local UNFOCUSED_QUALITY = Enum.QualityLevel.Level01 -- minimum
+
+local function applyFocused()
+	if setfpscap then
+		setfpscap(FOCUSED_FPS)
+	end
+	settings().Rendering.QualityLevel = FOCUSED_QUALITY
+end
+
+local function applyUnfocused()
+	if setfpscap then
+		setfpscap(UNFOCUSED_FPS)
+	end
+	settings().Rendering.QualityLevel = UNFOCUSED_QUALITY
+end
+
+uis.WindowFocused:Connect(applyFocused)
+uis.WindowFocusReleased:Connect(applyUnfocused)
+
+-- İlk duruma göre uygula
+if uis.WindowFocused then
+	applyFocused()
+else
+	applyUnfocused()
+end
