@@ -71203,8 +71203,8 @@ cmd.add({"actnpc"}, {"actnpc", "Start acting like an NPC"}, function()
 
 		if hum.Sit then
 			DebugNotif("Sitting detected — jumping to escape", 1.5)
-			hum.Sit = false
-			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+			hum.Sit = true
+			hum:ChangeState(Esnum.HumanoidStateType.Jumping)
 			NPCControl._jumpCooldown = 1.5
 			return
 		end
