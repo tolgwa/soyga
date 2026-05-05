@@ -1,7 +1,80 @@
 -- © 2026 Nameless Admin. @ltseverydayyou and @Cosmella own all rights to this script. Do not copy, paste, redistribute, or claim as your own.
 
-local _na_env = (getgenv and getgenv()) or _G or {}
-local _na_shared = rawget(_G, "shared")
+local _na_boot = {
+	hostEnv = (getgenv and getgenv()) or _G or {},
+}
+_na_boot.hostGetfenv = type(_na_boot.hostEnv.getfenv) == "function" and _na_boot.hostEnv.getfenv or getfenv
+_na_boot.hostSetfenv = type(_na_boot.hostEnv.setfenv) == "function" and _na_boot.hostEnv.setfenv or setfenv
+_na_boot.debug = rawget(_na_boot.hostEnv, "debug") or debug
+_na_boot.getPrivateRegistry = function()
+	local registry
+	if type(getreg) == "function" then
+		pcall(function()
+			registry = getreg()
+		end)
+	end
+	if type(registry) ~= "table" and type(_na_boot.debug) == "table" and type(_na_boot.debug.getregistry) == "function" then
+		pcall(function()
+			registry = _na_boot.debug.getregistry()
+		end)
+	end
+	if type(registry) ~= "table" then
+		registry = _na_boot.hostEnv
+	end
+	return registry
+end
+_na_boot.ensureTable = function(host, key)
+	local value = type(host) == "table" and rawget(host, key) or nil
+	if type(value) ~= "table" then
+		value = {}
+		if type(host) == "table" then
+			pcall(rawset, host, key, value)
+			if rawget(host, key) ~= value then
+				host[key] = value
+			end
+		end
+	end
+	return value
+end
+_na_boot.privateRegistry = _na_boot.getPrivateRegistry()
+_na_boot.privateRoot = _na_boot.ensureTable(_na_boot.privateRegistry, "__nameless_admin_private")
+local _na_env = _na_boot.ensureTable(_na_boot.privateRoot, "testing")
+local _na_shared = _na_boot.ensureTable(_na_env, "shared")
+_na_boot.runtimeEnv = _na_boot.ensureTable(_na_env, "runtime")
+
+_na_boot.runtimeEnv.shared = _na_shared
+_na_boot.runtimeEnv._G = _na_boot.runtimeEnv
+_na_boot.runtimeEnv.getgenv = function()
+	return _na_boot.runtimeEnv
+end
+_na_boot.runtimeEnv.getfenv = function(target)
+	if target == nil or target == 0 then
+		return _na_boot.runtimeEnv
+	end
+	if type(_na_boot.hostGetfenv) == "function" then
+		return _na_boot.hostGetfenv(target)
+	end
+	return _na_boot.runtimeEnv
+end
+
+setmetatable(_na_boot.runtimeEnv, {
+	__index = function(_, key)
+		if key == "_G" then
+			return _na_boot.runtimeEnv
+		elseif key == "shared" then
+			return _na_shared
+		elseif key == "getgenv" then
+			return _na_boot.runtimeEnv.getgenv
+		elseif key == "getfenv" then
+			return _na_boot.runtimeEnv.getfenv
+		end
+		return _na_boot.hostEnv[key]
+	end
+})
+
+if type(_na_boot.hostSetfenv) == "function" then
+	pcall(_na_boot.hostSetfenv, 1, _na_boot.runtimeEnv)
+end
 
 local function naAlreadyLoaded()
 	if _na_env and (_na_env.ltseverydayyou_NA or _na_env.NA_LOADED) then
@@ -18,28 +91,37 @@ if naAlreadyLoaded() then
 end
 
 local naFlagValue = tick()
-pcall(function()
-	if _na_env then
-		_na_env.ltseverydayyou_NA = naFlagValue
-		_na_env.NA_LOADED = naFlagValue
-		_na_env.NATestingVer = false
-		_na_env.NAverify = "Haryas Admin Is SKIDDED AS FUCK"
+local naVerifyKey = "Haryas Admin Is SKIDDED AS FUCK"
+
+_na_boot.syncRuntimeGlobals = function(values)
+	if type(values) ~= "table" then
+		return
 	end
-	if _na_shared then
-		_na_shared.ltseverydayyou_NA = naFlagValue
-		_na_shared.NA_LOADED = naFlagValue
+
+	for _, target in ipairs({ _na_env, _na_shared, _na_boot.runtimeEnv, _na_boot.hostEnv }) do
+		if type(target) == "table" then
+			for key, value in pairs(values) do
+				pcall(function()
+					target[key] = value
+				end)
+			end
+		end
 	end
-end)
+end
+
+_na_boot.syncRuntimeGlobals({
+	ltseverydayyou_NA = naFlagValue,
+	NA_LOADED = naFlagValue,
+	NATestingVer = false,
+	NAverify = naVerifyKey,
+	NAKey = naVerifyKey,
+	__NAKeySource = "Source.lua",
+})
 
 local __lt = (function()
-	local globalEnv = (getgenv and getgenv()) or _G or {};
-	local sharedEnv = rawget(_G, "shared");
-	local cacheHost = type(sharedEnv) == "table" and sharedEnv or (type(globalEnv) == "table" and globalEnv or nil);
-	if cacheHost then
-		local cached = rawget(cacheHost, "__lt_service_resolver");
-		if type(cached) == "table" then
-			return cached;
-		end;
+	local cached = rawget(_na_boot.privateRoot, "serviceResolver");
+	if type(cached) == "table" then
+		return cached;
 	end;
 	local loader = loadstring or load;
 	if type(loader) ~= "function" then
@@ -53,11 +135,15 @@ local __lt = (function()
 	if type(loaded) ~= "table" then
 		error("Service resolver failed to load");
 	end;
-	if cacheHost then
-		cacheHost.__lt_service_resolver = loaded;
-	end;
+	_na_boot.privateRoot.serviceResolver = loaded;
 	return loaded;
 end)();
+
+pcall(function()
+	_na_boot.syncRuntimeGlobals({
+		__NAServiceResolver = __lt,
+	})
+end)
 
 NAbegin=tick()
 CMDAUTOFILL={}
@@ -1246,6 +1332,46 @@ function SafeGetService(name, useCloneRef)
 	return NA_SRV[name]
 end
 
+NAmanage.SafeCloneRef = NAmanage.SafeCloneRef or function(value)
+	if value == nil then
+		return nil
+	end
+	local ref = NAmanage.NA_getCloneRef and NAmanage.NA_getCloneRef() or nil
+	if type(ref) == "function" then
+		local ok, cloned = pcall(ref, value)
+		if ok and cloned ~= nil then
+			return cloned
+		end
+	end
+	return value
+end
+
+NAmanage.GetMouse = NAmanage.GetMouse or function(plr)
+	if not plr then
+		local ps = SafeGetService and SafeGetService("Players") or nil
+		plr = ps and ps.LocalPlayer or nil
+	end
+	if not plr then
+		return nil
+	end
+	local ref = NAmanage.NA_getCloneRef and NAmanage.NA_getCloneRef() or nil
+	if type(ref) == "function" then
+		local ok, mouse = pcall(function()
+			return ref(plr:GetMouse())
+		end)
+		if ok and mouse then
+			return mouse
+		end
+	end
+	local ok, mouse = pcall(function()
+		return plr:GetMouse()
+	end)
+	if ok and mouse then
+		return mouse
+	end
+	return nil
+end
+
 NAmanage.uiObj = NAmanage.uiObj or function(v, seen)
 	if typeof(v) == "Instance" and v:IsA("ScreenGui") then
 		return v
@@ -1397,9 +1523,13 @@ local testingName = 'NA Testing'
 local adminName = 'NA'
 
 NAmanage.syncNameGlobals=function()
-	_na_env.mainName = mainName
-	_na_env.testingName = testingName
-	_na_env.adminName = adminName
+	if _na_boot and type(_na_boot.syncRuntimeGlobals) == "function" then
+		_na_boot.syncRuntimeGlobals({
+			mainName = mainName,
+			testingName = testingName,
+			adminName = adminName,
+		})
+	end
 end
 
 pcall(NAmanage.syncNameGlobals)
@@ -6313,6 +6443,84 @@ function getHum(char, waitSeconds)
 
 	local rec = NA_GRAB_BODY.ensure(target)
 	return rec and rec.humanoid or nil
+end
+
+NAmanage.GetJumpLaunchVelocity = function(hum)
+	if not hum then return nil end
+
+	local jumpPower = tonumber(NAlib.isProperty(hum, "JumpPower"))
+	if hum.UseJumpPower ~= false and jumpPower and jumpPower > 0 then
+		return jumpPower
+	end
+
+	local jumpHeight = tonumber(NAlib.isProperty(hum, "JumpHeight"))
+	if jumpHeight and jumpHeight > 0 then
+		return math.sqrt(2 * workspace.Gravity * jumpHeight)
+	end
+
+	return jumpPower
+end
+
+NAmanage.PrepareHumanoidForLaunch = function(hum)
+	if not hum then return end
+
+	pcall(function()
+		if NAlib.isProperty(hum, "Sit") ~= nil then
+			hum.Sit = false
+		end
+	end)
+
+	pcall(function()
+		if NAlib.isProperty(hum, "PlatformStand") ~= nil then
+			hum.PlatformStand = false
+		end
+	end)
+
+	local state
+	pcall(function()
+		state = hum:GetState()
+	end)
+
+	if state == Enum.HumanoidStateType.Seated
+		or state == Enum.HumanoidStateType.FallingDown
+		or state == Enum.HumanoidStateType.Ragdoll
+		or state == Enum.HumanoidStateType.PlatformStanding then
+		pcall(function()
+			hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end)
+	end
+end
+
+NAmanage.LaunchHumanoid = function(hum, root)
+	if not hum then return false end
+
+	if NAStuff.SafeJumpMethod == false then
+		return pcall(function()
+			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		end)
+	end
+
+	root = root or getRoot(hum.Parent)
+	if not root then return false end
+
+	NAmanage.PrepareHumanoidForLaunch(hum)
+
+	local launchY = NAmanage.GetJumpLaunchVelocity(hum)
+	if not launchY then return false end
+
+	local velocity = NAlib.isProperty(root, "AssemblyLinearVelocity") or root.Velocity
+	if typeof(velocity) ~= "Vector3" then
+		velocity = Vector3.new()
+	end
+
+	local boostedY = math.max(velocity.Y, launchY)
+	if NAlib.setProperty(root, "AssemblyLinearVelocity", Vector3.new(velocity.X, boostedY, velocity.Z)) then
+		return true
+	end
+
+	return pcall(function()
+		root.Velocity = Vector3.new(velocity.X, boostedY, velocity.Z)
+	end)
 end
 
 function getPlrHum(plr)
@@ -15411,7 +15619,7 @@ function DoPopup(text, title)
 	Popup(buildNotifArgs(text, nil, title, false))
 end
 
-local mouse=Players.LocalPlayer:GetMouse()
+local mouse=NAmanage.GetMouse(Players.LocalPlayer)
 
 for _, ev in ipairs(events) do
 	if type(Bindings[ev]) ~= "table" then
@@ -16121,6 +16329,39 @@ NAmanage.NASettingsGetSchema=function()
 				return math.clamp(numberValue, 0, 1)
 			end;
 		};
+		offsetVisualizerEnabled = {
+			default = nil;
+			coerce = function(value)
+				return coerceBoolean(value, nil)
+			end;
+		};
+		offsetVisualizerIncludeAccessories = {
+			default = nil;
+			coerce = function(value)
+				return coerceBoolean(value, nil)
+			end;
+		};
+		offsetVisualizerFillTransparency = {
+			default = nil;
+			coerce = function(value)
+				local numberValue = tonumber(value)
+				if not numberValue then
+					return nil
+				end
+				return math.clamp(numberValue, 0, 1)
+			end;
+		};
+		offsetVisualizerOutlineTransparency = {
+			default = nil;
+			coerce = function(value)
+				local numberValue = tonumber(value)
+				if not numberValue then
+					return nil
+				end
+				return math.clamp(numberValue, 0, 1)
+			end;
+		};
+
 		freecamSpeed = {
 			default = 5;
 			coerce = function(value)
@@ -16187,6 +16428,18 @@ NAmanage.NASettingsGetSchema=function()
 					return "Heartbeat"
 				end
 				return "RenderStepped"
+			end;
+		};
+		safeSpeedMethod = {
+			default = true;
+			coerce = function(value)
+				return coerceBoolean(value, true)
+			end;
+		};
+		safeJumpMethod = {
+			default = true;
+			coerce = function(value)
+				return coerceBoolean(value, true)
 			end;
 		};
 		cmdbar2Width = {
@@ -16541,6 +16794,16 @@ NAmanage.NASettingsGetSchema=function()
 				return ""
 			end;
 		};
+		customIconLocalPath = {
+			default = "";
+			coerce = function(value)
+				if typeof(value) ~= "string" then
+					value = tostring(value or "")
+				end
+				return value:match("^%s*(.-)%s*$") or ""
+			end;
+		};
+
 		customIconEnabled = {
 			default = false;
 			coerce = function(value)
@@ -17322,6 +17585,19 @@ NAmanage.NASettingsEnsure=function()
 
 	if typeof(NAStuff.NASettingsData) ~= "table" then
 		NAStuff.NASettingsData = {}
+	end
+
+	if NAStuff.NASettingsData.offVisOn == nil and NAStuff.NASettingsData.offsetVisualizerEnabled ~= nil then
+		NAStuff.NASettingsData.offVisOn = NAStuff.NASettingsData.offsetVisualizerEnabled
+	end
+	if NAStuff.NASettingsData.offVisAcc == nil and NAStuff.NASettingsData.offsetVisualizerIncludeAccessories ~= nil then
+		NAStuff.NASettingsData.offVisAcc = NAStuff.NASettingsData.offsetVisualizerIncludeAccessories
+	end
+	if NAStuff.NASettingsData.offVisFTr == nil and NAStuff.NASettingsData.offsetVisualizerFillTransparency ~= nil then
+		NAStuff.NASettingsData.offVisFTr = NAStuff.NASettingsData.offsetVisualizerFillTransparency
+	end
+	if NAStuff.NASettingsData.offVisOTr == nil and NAStuff.NASettingsData.offsetVisualizerOutlineTransparency ~= nil then
+		NAStuff.NASettingsData.offVisOTr = NAStuff.NASettingsData.offsetVisualizerOutlineTransparency
 	end
 
 	local legacyIconPath = "Nameless-Admin/IconPosition.json"
@@ -18530,8 +18806,12 @@ NAmanage.ApplyCommandKeybinds=function()
 		return dst
 	end
 
-	local function shouldBlock(gameProcessed)
-		if gameProcessed then return true end
+	local function isStrongKeybindInput(input)
+		return input and input.UserInputType == Enum.UserInputType.Keyboard
+	end
+
+	local function shouldBlock(input, gameProcessed)
+		if gameProcessed and not isStrongKeybindInput(input) then return true end
 		if not NAmanage.CanUseCommandKeybinds() then return true end
 		if NAStuff._capturingCommandKeybind then return true end
 		if UIS.GetFocusedTextBox and __lt.cm("UserInputService", "GetFocusedTextBox") then return true end
@@ -18820,7 +19100,7 @@ NAmanage.ApplyCommandKeybinds=function()
 
 	NAStuff.KeybindConnection = UIS.InputBegan:Connect(function(input, gameProcessed)
 		if not input then return end
-		if shouldBlock(gameProcessed) then return end
+		if shouldBlock(input, gameProcessed) then return end
 		local inputType = input.UserInputType
 		if inputType ~= Enum.UserInputType.Keyboard
 			and inputType ~= Enum.UserInputType.MouseButton1
@@ -18908,7 +19188,7 @@ NAmanage.ApplyCommandKeybinds=function()
 				end
 			end
 
-			if #relHolds == 0 and #relSpams == 0 and shouldBlock(gameProcessed) then
+			if #relHolds == 0 and #relSpams == 0 and shouldBlock(input, gameProcessed) then
 				return
 			end
 
@@ -19281,6 +19561,8 @@ NAStuff.CmdIntegrationAutoRun = NAmanage.NASettingsGet("cmdIntegrationAutoRun")
 NAStuff.AutoPreloadAssets = NAmanage.NASettingsGet("autoPreloadAssets")
 NAStuff.LightingStyleAutomation = NAmanage.NASettingsGet("lightingStyleAutomation") == true
 NAStuff.LightingStyleAutomationStyle = NAmanage.NASettingsGet("lightingStyleAutomationStyle") or "Soft"
+NAStuff.SafeSpeedMethod = NAmanage.NASettingsGet("safeSpeedMethod") ~= false
+NAStuff.SafeJumpMethod = NAmanage.NASettingsGet("safeJumpMethod") ~= false
 NAStuff.CustomMovementSounds = NAStuff.CustomMovementSounds or {}
 NAStuff.CustomMovementSounds.Enabled = NAmanage.NASettingsGet("customMovementSoundsEnabled") == true
 NAStuff.CustomMovementSounds.WalkInput = tostring(NAmanage.NASettingsGet("customMovementSoundsWalk") or "")
@@ -20536,13 +20818,40 @@ NAmanage.resolveCommandName=function(name)
 	return name
 end
 
+NAmanage.GetControlModule = NAmanage.GetControlModule or function()
+	if opt.ctrlModule and type(opt.ctrlModule.GetMoveVector) == "function" then
+		return opt.ctrlModule
+	end
+	local lp = LocalPlayer or (Players and Players.LocalPlayer)
+	if not lp then
+		return nil
+	end
+	local ps = lp:FindFirstChildOfClass("PlayerScripts") or lp:FindFirstChild("PlayerScripts")
+	if not ps then
+		return nil
+	end
+	local pm = ps:FindFirstChild("PlayerModule")
+	if not pm then
+		return nil
+	end
+	local cm = pm:FindFirstChild("ControlModule")
+	if not cm then
+		return nil
+	end
+	local ok, result = pcall(require, cm)
+	if ok and result and type(result.GetMoveVector) == "function" then
+		opt.ctrlModule = result
+		return result
+	end
+	return nil
+end
+
 SpawnCall(function()
 	local playerScripts = LocalPlayer:WaitForChild("PlayerScripts", math.huge)
 	local playerModule = playerScripts:WaitForChild("PlayerModule", math.huge)
 	local controlModule = playerModule:WaitForChild("ControlModule", math.huge)
-
 	local ok, result = pcall(require, controlModule)
-	if ok and result then
+	if ok and result and type(result.GetMoveVector) == "function" then
 		opt.ctrlModule = result
 	end
 end)
@@ -20588,15 +20897,18 @@ NAmanage.updateInputVector=function()
 	if sussyINPUTTER.A then x = x - 1 end
 	if sussyINPUTTER.D then x = x + 1 end
 
+	NAStuff._moveInputKeyboardVector = Vector3.new(x, 0, z)
 	if thumberSTICKER.Magnitude > 0.1 then
 		customVECTORMOVE = Vector3.new(thumberSTICKER.X, 0, thumberSTICKER.Y)
 	else
-		customVECTORMOVE = Vector3.new(x, 0, z)
+		customVECTORMOVE = NAStuff._moveInputKeyboardVector
 	end
 
 	if customVECTORMOVE.Magnitude > 1 then
 		customVECTORMOVE = customVECTORMOVE.Unit
 	end
+	NAStuff._moveInputLastUpdate = os.clock()
+	NAStuff._moveInputKeyboardActive = x ~= 0 or z ~= 0
 end
 
 if NAStuff._moveInputBegan then
@@ -20627,28 +20939,75 @@ NAStuff._moveInputEnded = UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
-function GetCustomMoveVector()
-	local fallback = Vector3.new(customVECTORMOVE.X, customVECTORMOVE.Y, -customVECTORMOVE.Z)
-
-	if opt.ctrlModule then
-		local ok, vec = pcall(function()
-			return opt.ctrlModule:GetMoveVector()
-		end)
-		if ok and typeof(vec) == "Vector3" and vec.Magnitude > 0 then
+function GetCustomMoveVector(useHumanoidFallback)
+	local function normalizeMoveVec(vec, invertYToZ)
+		local vecType = typeof(vec)
+		if vecType == "Vector3" then
 			return vec
+		end
+		if vecType == "Vector2" then
+			return Vector3.new(vec.X, 0, (invertYToZ and -vec.Y or vec.Y))
+		end
+		if type(vec) == "table" then
+			local x = tonumber(vec.X or vec.x or vec[1]) or 0
+			local y = tonumber(vec.Y or vec.y or vec[2]) or 0
+			local z = tonumber(vec.Z or vec.z or vec[3])
+			if z ~= nil then
+				return Vector3.new(x, y, z)
+			end
+			return Vector3.new(x, 0, (invertYToZ and -y or y))
+		end
+		return nil
+	end
+
+	local function getHumanoidMoveDirection()
+		local hum = getHum and getHum() or nil
+		if not hum then
+			return nil
+		end
+		return normalizeMoveVec(NAlib.isProperty(hum, "MoveDirection"), false)
+	end
+
+	local ctrl = NAmanage.GetControlModule and NAmanage.GetControlModule() or opt.ctrlModule
+	if ctrl and type(ctrl.GetMoveVector) == "function" then
+		local ok, vec = pcall(function()
+			return ctrl:GetMoveVector()
+		end)
+		if ok then
+			local normalized = normalizeMoveVec(vec, true)
+			if normalized and normalized.Magnitude > 1 then
+				normalized = normalized.Unit
+			end
+			if normalized and normalized.Magnitude > 0 then
+				return normalized
+			end
 		end
 	end
 
+	local keyboardSource = normalizeMoveVec(NAStuff._moveInputKeyboardVector, false) or Vector3.zero
+	local keyboardFallback = Vector3.new(keyboardSource.X, keyboardSource.Y, -keyboardSource.Z)
+	if keyboardFallback.Magnitude > 0 then
+		return keyboardFallback
+	end
+
+	local fallbackSource = normalizeMoveVec(customVECTORMOVE, false) or Vector3.zero
+	local fallback = Vector3.new(fallbackSource.X, fallbackSource.Y, -fallbackSource.Z)
 	if fallback.Magnitude > 0 then
 		return fallback
 	end
 
-	local hum = getHum and getHum() or nil
-	if hum then
-		local md = hum.MoveDirection
-		if typeof(md) == "Vector3" and md.Magnitude > 0 then
-			return md
-		end
+	if useHumanoidFallback == false then
+		return Vector3.zero
+	end
+
+	local magnitudeMove = getHumanoidMoveDirection()
+	if magnitudeMove and magnitudeMove.Magnitude > 0.05 then
+		return magnitudeMove
+	end
+
+	local humanoidMove = getHumanoidMoveDirection()
+	if humanoidMove and humanoidMove.Magnitude > 0 then
+		return humanoidMove
 	end
 
 	return Vector3.zero
@@ -26173,6 +26532,7 @@ NAmanage.FLY_Cleanup = function(char)
 	local c = char or getChar()
 	local hum = getHum(c)
 	local head = getHead(c)
+	NAmanage.ClearVelocityWalkSpeedClampState()
 	if head then pcall(function() head.Anchored = false end) end
 	if hum then
 		pcall(function() hum.PlatformStand = false end)
@@ -26383,6 +26743,7 @@ NAmanage.sFLY=function(vfly,cfly,tfly)
 	while not getChar() or not getRoot(getChar()) or not getHum() do Wait() end
 	CONTROL={Q=0,E=0}; lCONTROL={Q=0,E=0}; SPEED=0
 	local hum=getHum(); local head=getHead(getChar()); local root=getRoot(getChar())
+	NAmanage.EnsureVelocityWalkSpeedClampLoop()
 	NAmanage._bindQE()
 	if tfly then
 		goofyFLY=goofyFLY or InstanceNew("Part",workspace)
@@ -26405,6 +26766,9 @@ NAmanage.sFLY=function(vfly,cfly,tfly)
 				while NAmanage._state.mode=="tfly" do
 					local cam=NAmanage._camera()
 					if cam and FLYING and flyVariables.TFpos and flyVariables.TFgyro then
+						local currentChar=getChar()
+						local currentHum=getHum(currentChar)
+						local currentRoot=currentChar and getRoot(currentChar)
 						local sp=tonumber(flyVariables.TflySpeed) or 1
 						local mv=GetCustomMoveVector(); mv=Vector3.new(mv.X,mv.Y,-mv.Z)
 						local np=flyVariables.TFgyro.cframe-flyVariables.TFgyro.cframe.p+flyVariables.TFpos.position
@@ -26417,9 +26781,15 @@ NAmanage.sFLY=function(vfly,cfly,tfly)
 							flyVariables.TFpos.position=np.p
 							flyVariables.TFgyro.cframe=cam.CFrame
 						end)
+						if currentRoot and currentHum then
+							NAmanage.SetVelocityWalkSpeedClampState(currentRoot, currentHum, Vector3.new(1,1,1))
+						end
+					else
+						NAmanage.ClearVelocityWalkSpeedClampState()
 					end
 					Wait()
 				end
+				NAmanage.ClearVelocityWalkSpeedClampState()
 				flyVariables._tflyLoop=false
 			end)
 		end
@@ -26463,6 +26833,9 @@ NAmanage.sFLY=function(vfly,cfly,tfly)
 				while (NAmanage._state.mode=="fly" or NAmanage._state.mode=="vfly") do
 					local cam=NAmanage._camera()
 					if cam and FLYING and flyVariables.BV and flyVariables.BG then
+						local currentChar=getChar()
+						local currentHum=getHum(currentChar)
+						local currentRoot=currentChar and getRoot(currentChar)
 						local mv=GetCustomMoveVector(); mv=Vector3.new(mv.X,mv.Y,-mv.Z)
 						local has=mv.Magnitude>0 or CONTROL.Q~=0 or CONTROL.E~=0
 						if has then
@@ -26473,17 +26846,26 @@ NAmanage.sFLY=function(vfly,cfly,tfly)
 						if has then
 							flyVariables.BV.velocity=((cam.CFrame.LookVector*mv.Z)+((cam.CFrame*CFrame.new(mv.X,(mv.Z+CONTROL.Q+CONTROL.E)*0.2,0).p)-cam.CFrame.p))*SPEED
 							lCONTROL={Q=CONTROL.Q,E=CONTROL.E}
+							if currentRoot and currentHum then
+								NAmanage.SetVelocityWalkSpeedClampState(currentRoot, currentHum, Vector3.new(1,1,1))
+							end
 						elseif SPEED~=0 then
 							flyVariables.BV.velocity=((cam.CFrame.LookVector*mv.Z)+((cam.CFrame*CFrame.new(mv.X,(mv.Z+lCONTROL.Q+lCONTROL.E)*0.2,0).p)-cam.CFrame.p))*SPEED
+							if currentRoot and currentHum then
+								NAmanage.SetVelocityWalkSpeedClampState(currentRoot, currentHum, Vector3.new(1,1,1))
+							end
 						else
 							flyVariables.BV.velocity=Vector3.zero
+							NAmanage.ClearVelocityWalkSpeedClampState()
 						end
 						flyVariables.BG.cframe=cam.CFrame
 					elseif flyVariables.BV then
 						flyVariables.BV.velocity=Vector3.zero
+						NAmanage.ClearVelocityWalkSpeedClampState()
 					end
 					Wait()
 				end
+				NAmanage.ClearVelocityWalkSpeedClampState()
 				if flyVariables.BG then pcall(function() flyVariables.BG:Destroy() end) end
 				if flyVariables.BV then pcall(function() flyVariables.BV:Destroy() end) end
 				flyVariables.BG=nil; flyVariables.BV=nil
@@ -26578,6 +26960,9 @@ NAmanage._ensureLoops=function()
 						Wait()
 					else
 						if FLYING then
+							local currentChar=getChar()
+							local currentHum=getHum(currentChar)
+							local currentRoot=currentChar and getRoot(currentChar)
 							local cam=workspace.CurrentCamera
 							local sp=tonumber(flyVariables.TflySpeed) or 1
 							local mv=GetCustomMoveVector(); mv=Vector3.new(mv.X,mv.Y,-mv.Z)
@@ -26591,10 +26976,16 @@ NAmanage._ensureLoops=function()
 								flyVariables.TFpos.position=np.p
 								flyVariables.TFgyro.cframe=cam.CFrame
 							end)
+							if currentRoot and currentHum then
+								NAmanage.SetVelocityWalkSpeedClampState(currentRoot, currentHum, Vector3.new(1,1,1))
+							end
+						else
+							NAmanage.ClearVelocityWalkSpeedClampState()
 						end
 					end
 					Wait()
 				end
+				NAmanage.ClearVelocityWalkSpeedClampState()
 				flyVariables._tflyLoop=false
 			end)
 		end
@@ -26608,6 +26999,9 @@ NAmanage._ensureLoops=function()
 						Wait()
 					else
 						if FLYING then
+							local currentChar=getChar()
+							local currentHum=getHum(currentChar)
+							local currentRoot=currentChar and getRoot(currentChar)
 							local cam=workspace.CurrentCamera
 							local mv=GetCustomMoveVector(); mv=Vector3.new(mv.X,mv.Y,-mv.Z)
 							local has=mv.Magnitude>0 or CONTROL.Q~=0 or CONTROL.E~=0
@@ -26622,23 +27016,32 @@ NAmanage._ensureLoops=function()
 									flyVariables.BG.cframe=cam.CFrame
 								end)
 								lCONTROL={Q=CONTROL.Q,E=CONTROL.E}
+								if currentRoot and currentHum then
+									NAmanage.SetVelocityWalkSpeedClampState(currentRoot, currentHum, Vector3.new(1,1,1))
+								end
 							elseif SPEED~=0 then
 								pcall(function()
 									flyVariables.BV.velocity=((cam.CFrame.LookVector*mv.Z)+((cam.CFrame*CFrame.new(mv.X,(mv.Z+lCONTROL.Q+lCONTROL.E)*0.2,0).p)-cam.CFrame.p))*SPEED
 									flyVariables.BG.cframe=cam.CFrame
 								end)
+								if currentRoot and currentHum then
+									NAmanage.SetVelocityWalkSpeedClampState(currentRoot, currentHum, Vector3.new(1,1,1))
+								end
 							else
 								pcall(function()
 									flyVariables.BV.velocity=Vector3.zero
 									flyVariables.BG.cframe=cam.CFrame
 								end)
+								NAmanage.ClearVelocityWalkSpeedClampState()
 							end
 						else
 							if flyVariables.BV then pcall(function() flyVariables.BV.velocity=Vector3.zero end) end
+							NAmanage.ClearVelocityWalkSpeedClampState()
 						end
 					end
 					Wait()
 				end
+				NAmanage.ClearVelocityWalkSpeedClampState()
 				flyVariables._stdLoop=false
 			end)
 		end
@@ -28212,13 +28615,7 @@ NAmanage.LoadPlugins = function(opts)
 			proxyEnv.ContextActionService = proxyEnv.ContextActionService or SafeGetService("ContextActionService")
 
 			local function iyMouse()
-				if lp and lp.GetMouse then
-					local ok, m = pcall(lp.GetMouse, lp)
-					if ok and m then
-						return m
-					end
-				end
-				return nil
+				return NAmanage.GetMouse(lp)
 			end
 			proxyEnv.IYMouse = iyMouse()
 
@@ -31946,7 +32343,7 @@ cmd.add({"clickfling","mousefling"},{"clickfling (mousefling)","Fling a player b
 	if clickflingUI then clickflingUI:Destroy() end
 	NAlib.disconnect("clickfling_mouse")
 
-	local Mouse = player:GetMouse()
+	local Mouse = NAmanage.GetMouse(player)
 	clickflingUI = InstanceNew("ScreenGui")
 	NAgui.NaProtectUI(clickflingUI)
 
@@ -32488,6 +32885,8 @@ NAmanage.ovUpd = function(st, root, base, offVec)
 	end
 
 	local off = (typeof(offVec) == "Vector3") and offVec or Vector3.new()
+	local rootBase = base
+	local rootTarget = (rootBase * NAmanage.UG_getTransform(st)) + off
 	local mdl = NAmanage.ovEns(st)
 	if not mdl then
 		return
@@ -32547,8 +32946,9 @@ NAmanage.ovUpd = function(st, root, base, offVec)
 
 				if gp then
 					pcall(function()
+						local rel = rootBase:ToObjectSpace(src.CFrame)
 						gp.Size = src.Size
-						gp.CFrame = src.CFrame + off
+						gp.CFrame = rootTarget * rel
 						gp.Material = Enum.Material.Glass
 						gp.Color = Color3.new(1, 1, 1)
 						gp.Transparency = 1
@@ -32614,7 +33014,11 @@ NAmanage.ovLive = function(reb)
 		return
 	end
 	local base = st.UndergroundCurrent or root.CFrame
-	local off = st.UndergroundOffset or NAStuff.NA_UNDERGROUND_OFFSET or Vector3.new(0, -15, 0)
+	local off = st.UndergroundResolvedOffset or st.UndergroundOffset or Vector3.new()
+	if off.Magnitude <= 0.0001 then
+		NAmanage.ovClr(st)
+		return
+	end
 	NAmanage.ovUpd(st, root, base, off)
 end
 
@@ -32632,8 +33036,199 @@ do
 	st.Underground = false
 	st.UndergroundBind = false
 	st.UndergroundCurrent = nil
+	st.UndergroundTransform = nil
+	st.UndergroundMirrorGround = nil
+	st.UndergroundResolvedOffset = nil
 	st.PendingTranslation = nil
 	st.heartbeatConnection = nil
+end
+
+NAStuff.NA_UNDERGROUND_IDENTITY_CFRAME = NAStuff.NA_UNDERGROUND_IDENTITY_CFRAME or CFrame.new()
+NAStuff.NA_UNDERGROUND_UPSIDEDOWN_CFRAME = NAStuff.NA_UNDERGROUND_UPSIDEDOWN_CFRAME
+	or (CFrame.Angles(math.rad(180), 0, 0) * CFrame.Angles(0, math.rad(180), 0))
+NAStuff.NA_UNDERGROUND_MIRROR_RAY_DISTANCE = NAStuff.NA_UNDERGROUND_MIRROR_RAY_DISTANCE or 2048
+NAStuff.NA_UNDERGROUND_MIRROR_FALLBACK_OFFSET = NAStuff.NA_UNDERGROUND_MIRROR_FALLBACK_OFFSET or Vector3.new(0, -15, 0)
+
+NAmanage.UG_hasOffset = function(vec)
+	return typeof(vec) == "Vector3" and vec.Magnitude > 0.0001
+end
+
+NAmanage.UG_getTransform = function(state)
+	local transform = state and state.UndergroundTransform
+	if typeof(transform) == "CFrame" then
+		return transform
+	end
+	return NAStuff.NA_UNDERGROUND_IDENTITY_CFRAME
+end
+
+NAmanage.UG_hasTransform = function(state)
+	return NAmanage.UG_getTransform(state) ~= NAStuff.NA_UNDERGROUND_IDENTITY_CFRAME
+end
+
+NAmanage.UG_updateVisualizer = function(state, root, current)
+	local offsetVec = (state and state.UndergroundResolvedOffset) or (state and state.UndergroundOffset) or Vector3.new()
+	if state and root and current and NAmanage.UG_hasOffset(offsetVec) then
+		NAmanage.ovUpd(state, root, current, offsetVec)
+	else
+		NAmanage.ovClr(state)
+	end
+end
+
+NAmanage.UG_fetchCharPieces = function()
+	local chr = getChar()
+	if not chr then
+		return nil, nil, nil
+	end
+	local hum = getHum()
+	local root = getRoot(chr)
+	if not root then
+		for _, part in ipairs(chr:GetChildren()) do
+			if part:IsA("BasePart") then
+				root = part
+				break
+			end
+		end
+	end
+	return chr, root, hum
+end
+
+NAmanage.UG_raycastDown = function(origin)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local filter = {}
+	local chr = getChar()
+	if chr then
+		Insert(filter, chr)
+	end
+	params.FilterDescendantsInstances = filter
+	return workspace:Raycast(origin, Vector3.new(0, -NAStuff.NA_UNDERGROUND_MIRROR_RAY_DISTANCE, 0), params)
+end
+
+NAmanage.UG_getActiveOffset = function(state, root, hum)
+	local extraOffset = (state and state.UndergroundOffset) or Vector3.new()
+	if not (state and state.UndergroundMirrorGround and root) then
+		return extraOffset
+	end
+
+	local rayOrigin = root.Position + Vector3.new(0, 4, 0)
+	local hit = NAmanage.UG_raycastDown(rayOrigin)
+	if hit and hit.Position then
+		local mirroredRootY = (2 * hit.Position.Y) - root.Position.Y
+		return Vector3.new(0, mirroredRootY - root.Position.Y, 0) + extraOffset
+	end
+
+	local hrpHalf = ((NAlib.isProperty(root, "Size") and root.Size.Y) or 2) * 0.5
+	local feetFromRoot = hrpHalf + ((hum and hum.HipHeight) or 2)
+	return Vector3.new(0, -(feetFromRoot * 2), 0) + extraOffset + NAStuff.NA_UNDERGROUND_MIRROR_FALLBACK_OFFSET
+end
+
+NAmanage.UG_disable = function(state, message)
+	if type(state) ~= "table" then
+		return
+	end
+
+	local function fetchRoot()
+		local _, root = NAmanage.UG_fetchCharPieces()
+		return root
+	end
+
+	for _ = 1, 10 do
+		local root = fetchRoot()
+		if root then
+			root.CFrame = state.UndergroundCurrent or root.CFrame
+		end
+		Wait()
+	end
+
+	state.UndergroundCurrent = nil
+	state.UndergroundTransform = nil
+	state.UndergroundMirrorGround = nil
+	state.UndergroundResolvedOffset = nil
+
+	local hb = state.heartbeatConnection
+	if hb then
+		pcall(function()
+			hb:Disconnect()
+		end)
+		state.heartbeatConnection = nil
+	end
+
+	state.UndergroundOffset = nil
+	state.PendingTranslation = nil
+	state.Underground = false
+	NAmanage.ovClr(state)
+
+	if state.UndergroundBind then
+		state.UndergroundBind = false
+		if RunService and RunService.UnbindFromRenderStep then
+			pcall(RunService.UnbindFromRenderStep, RunService, NAStuff.NA_UNDERGROUND_BIND_NAME)
+		end
+	end
+
+	if message and type(DoNotif) == "function" then
+		DoNotif(message, 2)
+	end
+end
+
+NAmanage.UG_enable = function(state, rootPart)
+	if state.Underground then
+		NAmanage.UG_updateVisualizer(state, rootPart, state.UndergroundCurrent or (rootPart and rootPart.CFrame))
+		return
+	end
+
+	state.Underground = true
+	state.UndergroundCurrent = rootPart.CFrame
+	state.PendingTranslation = nil
+
+	local prevHB = state.heartbeatConnection
+	if prevHB then
+		pcall(function() prevHB:Disconnect() end)
+	end
+
+	state.heartbeatConnection = RunService.Heartbeat:Connect(function()
+		if not state.Underground then
+			return
+		end
+
+		local _, currentRoot, hum = NAmanage.UG_fetchCharPieces()
+		if not currentRoot then
+			return
+		end
+
+		local baseCFrame = currentRoot.CFrame
+		local pendingTranslation = state.PendingTranslation
+		if typeof(pendingTranslation) == "Vector3" and pendingTranslation.Magnitude > 0 then
+			baseCFrame += pendingTranslation
+			state.PendingTranslation = nil
+		end
+
+		state.UndergroundCurrent = baseCFrame
+		if hum then
+			hum.Sit = false
+		end
+
+		local activeTransform = NAmanage.UG_getTransform(state)
+		local activeOffset = NAmanage.UG_getActiveOffset(state, currentRoot, hum)
+		state.UndergroundResolvedOffset = activeOffset
+		currentRoot.CFrame = (baseCFrame * activeTransform) + activeOffset
+	end)
+
+	if RunService and RunService.UnbindFromRenderStep then
+		pcall(RunService.UnbindFromRenderStep, RunService, NAStuff.NA_UNDERGROUND_BIND_NAME)
+	end
+	state.UndergroundBind = true
+	__lt.cm("RunService", "BindToRenderStep", NAStuff.NA_UNDERGROUND_BIND_NAME, Enum.RenderPriority.First.Value, function()
+		local current = state.UndergroundCurrent
+		if state.Underground and current then
+			local _, root = NAmanage.UG_fetchCharPieces()
+			if root then
+				root.CFrame = current
+				NAmanage.UG_updateVisualizer(state, root, current)
+			end
+		end
+	end)
+
+	NAmanage.UG_updateVisualizer(state, rootPart, state.UndergroundCurrent or rootPart.CFrame)
 end
 
 cmd.add({"offset","offpos","off"},{"offset [x y z|y]","Offsets your character for others (positive Y = up, negative Y = down)"},function(...)
@@ -32647,25 +33242,7 @@ cmd.add({"offset","offpos","off"},{"offset [x y z|y]","Offsets your character fo
 		return val
 	end
 
-	local function fetchCharPieces()
-		local chr = getChar()
-		if not chr then
-			return nil, nil, nil
-		end
-		local hum = getHum()
-		local root = getRoot(chr)
-		if not root then
-			for _, part in ipairs(chr:GetChildren()) do
-				if part:IsA("BasePart") then
-					root = part
-					break
-				end
-			end
-		end
-		return chr, root, hum
-	end
-
-	local character, rootPart, humanoid = fetchCharPieces()
+	local character, rootPart, humanoid = NAmanage.UG_fetchCharPieces()
 	if not (character and rootPart and humanoid) then
 		if type(DoNotif) == "function" then
 			DoNotif("Character is not ready yet", 2)
@@ -32697,69 +33274,53 @@ cmd.add({"offset","offpos","off"},{"offset [x y z|y]","Offsets your character fo
 	local Underground = UG_Get("Underground")
 	if Underground then
 		UG_Set("UndergroundOffset", offsetVec)
-		NAmanage.ovLive(false)
+		state.UndergroundResolvedOffset = state.UndergroundMirrorGround and NAmanage.UG_getActiveOffset(state, rootPart, humanoid) or offsetVec
+		NAmanage.UG_updateVisualizer(state, rootPart, UG_Get("UndergroundCurrent") or rootPart.CFrame)
 		if type(DoNotif) == "function" then
 			DoNotif("Offset updated", 2)
 		end
 		return
 	end
 
-	UG_Set("Underground", true)
-	UG_Set("UndergroundCurrent", rootPart.CFrame)
 	UG_Set("UndergroundOffset", offsetVec)
+	state.UndergroundResolvedOffset = state.UndergroundMirrorGround and NAmanage.UG_getActiveOffset(state, rootPart, humanoid) or offsetVec
 	UG_Set("PendingTranslation", nil)
 
-	local prevHB = UG_Get("heartbeatConnection")
-	if prevHB then
-		pcall(function() prevHB:Disconnect() end)
-	end
-
-	UG_Set("heartbeatConnection", RunService.Heartbeat:Connect(function()
-		if not UG_Get("Underground") then
-			return
-		end
-
-		local _, currentRoot, hum = fetchCharPieces()
-		if not currentRoot then
-			return
-		end
-
-		local baseCFrame = currentRoot.CFrame
-		local pendingTranslation = UG_Get("PendingTranslation")
-		if typeof(pendingTranslation) == "Vector3" and pendingTranslation.Magnitude > 0 then
-			baseCFrame += pendingTranslation
-			UG_Set("PendingTranslation", nil)
-		end
-		local activeOffset = UG_Get("UndergroundOffset") or defaultOffset
-		UG_Set("UndergroundCurrent", baseCFrame)
-		if hum then
-			hum.Sit = false
-		end
-
-		currentRoot.CFrame = baseCFrame + activeOffset
-	end))
-
-	if RunService and RunService.UnbindFromRenderStep then
-		pcall(RunService.UnbindFromRenderStep, RunService, NAStuff.NA_UNDERGROUND_BIND_NAME)
-	end
-	UG_Set("UndergroundBind", true)
-	__lt.cm("RunService", "BindToRenderStep", NAStuff.NA_UNDERGROUND_BIND_NAME, Enum.RenderPriority.First.Value, function()
-		local current = UG_Get("UndergroundCurrent")
-		if UG_Get("Underground") and current then
-			local _, r = fetchCharPieces()
-			if r then
-				r.CFrame = current
-				NAmanage.ovUpd(state, r, current, UG_Get("UndergroundOffset") or defaultOffset)
-			end
-		end
-	end)
-
-	NAmanage.ovUpd(state, rootPart, UG_Get("UndergroundCurrent") or rootPart.CFrame, UG_Get("UndergroundOffset") or defaultOffset)
+	NAmanage.UG_enable(state, rootPart)
 
 	if type(DoNotif) == "function" then
 		DoNotif("Offset enabled (replicates for others)", 2)
 	end
 	return
+end)
+
+cmd.add({"upsidedown","flipchar"},{"upsidedown","Flips your character upside down for others using the offset replication method"},function()
+	local state = NAStuff.NAundergroundState
+	local character, rootPart, humanoid = NAmanage.UG_fetchCharPieces()
+	if not (character and rootPart and humanoid) then
+		if type(DoNotif) == "function" then
+			DoNotif("Character is not ready yet", 2)
+		end
+		return
+	end
+
+	state.UndergroundTransform = NAStuff.NA_UNDERGROUND_UPSIDEDOWN_CFRAME
+	state.UndergroundMirrorGround = true
+	if not state.Underground then
+		state.UndergroundOffset = state.UndergroundOffset or Vector3.new()
+		state.PendingTranslation = nil
+		NAmanage.UG_enable(state, rootPart)
+		if type(DoNotif) == "function" then
+			DoNotif("Upsidedown enabled (replicates for others)", 2)
+		end
+		return
+	end
+
+	state.UndergroundResolvedOffset = NAmanage.UG_getActiveOffset(state, rootPart, humanoid)
+	NAmanage.UG_updateVisualizer(state, rootPart, state.UndergroundCurrent or rootPart.CFrame)
+	if type(DoNotif) == "function" then
+		DoNotif("Upsidedown updated", 2)
+	end
 end)
 
 cmd.add({"unoffset","unoffpos","unoff"},{"unoffset","Disables offset and restores your character"},function()
@@ -32774,56 +33335,42 @@ cmd.add({"unoffset","unoffpos","unoff"},{"unoffset","Disables offset and restore
 		return
 	end
 
-	local function fetchRoot()
-		local chr = getChar()
-		if not chr then
-			return nil
-		end
-		local root = getRoot(chr)
-		if not root then
-			for _, part in ipairs(chr:GetChildren()) do
-				if part:IsA("BasePart") then
-					root = part
-					break
-				end
-			end
-		end
-		return root
-	end
-
-	for _ = 1, 10 do
-		local r = fetchRoot()
-		if r then
-			r.CFrame = state.UndergroundCurrent or r.CFrame
-		end
-		Wait()
-	end
-
-	state.UndergroundCurrent = nil
-
-	local hb = state.heartbeatConnection
-	if hb then
-		pcall(function()
-			hb:Disconnect()
-		end)
-		state.heartbeatConnection = nil
-	end
-
 	state.UndergroundOffset = nil
-	state.PendingTranslation = nil
-	state.Underground = false
-	NAmanage.ovClr(state)
-
-	if state.UndergroundBind then
-		state.UndergroundBind = false
-		if RunService and RunService.UnbindFromRenderStep then
-			pcall(RunService.UnbindFromRenderStep, RunService, NAStuff.NA_UNDERGROUND_BIND_NAME)
+	if NAmanage.UG_hasTransform(state) then
+		local _, root, hum = NAmanage.UG_fetchCharPieces()
+		state.UndergroundResolvedOffset = NAmanage.UG_getActiveOffset(state, root, hum)
+		NAmanage.UG_updateVisualizer(state, root, state.UndergroundCurrent or (root and root.CFrame))
+		if type(DoNotif) == "function" then
+			DoNotif("Offset disabled, upside down is still active", 2)
 		end
+		return
 	end
 
-	if type(DoNotif) == "function" then
-		DoNotif("Offset disabled, you're back to normal", 2)
+	NAmanage.UG_disable(state, "Offset disabled, you're back to normal")
+end)
+
+cmd.add({"unupsidedown","unflipchar"},{"unupsidedown","Disables the upside down replication and restores your character"},function()
+	local state = NAStuff.NAundergroundState
+	if type(state) ~= "table" or state.Underground ~= true then
+		if type(DoNotif) == "function" then
+			DoNotif("Upsidedown is already disabled", 2)
+		end
+		return
 	end
+
+	state.UndergroundTransform = nil
+	state.UndergroundMirrorGround = nil
+	if NAmanage.UG_hasOffset(state.UndergroundOffset) then
+		state.UndergroundResolvedOffset = state.UndergroundOffset
+		local _, root = NAmanage.UG_fetchCharPieces()
+		NAmanage.UG_updateVisualizer(state, root, state.UndergroundCurrent or (root and root.CFrame))
+		if type(DoNotif) == "function" then
+			DoNotif("Upsidedown disabled, offset is still active", 2)
+		end
+		return
+	end
+
+	NAmanage.UG_disable(state, "Upsidedown disabled, you're back to normal")
 end)
 
 clickscareUI = nil
@@ -32834,7 +33381,7 @@ cmd.add({"clickscare","clickspook"},{"clickscare (clickspook)","Teleports next t
 	if clickscareUI then clickscareUI:Destroy() end
 	NAlib.disconnect("clickscare_mouse")
 
-	local Mouse = player:GetMouse()
+	local Mouse = NAmanage.GetMouse(player)
 	clickscareUI = InstanceNew("ScreenGui")
 	NAgui.NaProtectUI(clickscareUI)
 
@@ -32937,7 +33484,7 @@ cmd.add({"hovername","namehover"}, {"hovername", "Shows player's username on hov
 	hoverNameSelection.Adornee = nil
 	hoverNameSelection.Parent = nil
 
-	local mouse = player and player:GetMouse()
+	local mouse = player and NAmanage.GetMouse(player)
 	if not mouse then
 		NAmanage.cleanupHoverName()
 		return
@@ -34802,6 +35349,26 @@ cmd.add({"rjre","rejoinrefresh"},{"rjre (rejoinrefresh)","Rejoins and teleports 
 			local tpScript = Format([[
 local s,err = pcall(function()
 	repeat Wait() until game:IsLoaded()
+	local function naPrivateRoot()
+		local env = (getgenv and getgenv()) or _G or {}
+		local dbg = rawget(env, "debug") or debug
+		local registry
+		if type(getreg) == "function" then
+			pcall(function()
+				registry = getreg()
+			end)
+		end
+		if type(registry) ~= "table" and type(dbg) == "table" and type(dbg.getregistry) == "function" then
+			pcall(function()
+				registry = dbg.getregistry()
+			end)
+		end
+		if type(registry) ~= "table" then
+			registry = env
+		end
+		local root = type(registry) == "table" and rawget(registry, "__nameless_admin_private") or nil
+		return type(root) == "table" and root or nil
+	end
 	local function resolveService(name)
 		local svc = game:FindService(name)
 		if svc then
@@ -34828,6 +35395,11 @@ local s,err = pcall(function()
 
 	local gb
 	local ok,env = pcall(function()
+		local root = naPrivateRoot()
+		local scope = root and root.testing
+		if type(scope) == "table" then
+			return scope.runtime or scope
+		end
 		return getgenv and getgenv() or _G
 	end)
 	if ok and env then
@@ -39515,7 +40087,7 @@ cmd.add({"triggerbot", "tbot"}, {"triggerbot (tbot)", "Executes a script that au
 	local Camera = workspace.CurrentCamera
 
 	local Player = Players.LocalPlayer
-	local Mouse = Player:GetMouse()
+	local Mouse = NAmanage.GetMouse(Player)
 	local Toggled = false
 	local Mode = "FFA"
 	local LastMode = nil
@@ -40253,7 +40825,7 @@ NAmanage.makeClickTweenUI = function()
 	NAmanage.clearAllTP()
 	local TweenService = SafeGetService("TweenService")
 	local player = Players.LocalPlayer
-	local mouse = player:GetMouse()
+	local mouse = NAmanage.GetMouse(player)
 
 	NAStuff.tpUI = InstanceNew("ScreenGui")
 	NAgui.NaProtectUI(NAStuff.tpUI)
@@ -40399,7 +40971,7 @@ NAmanage.makeClickTweenTools = function()
 		tool.CanBeDropped = false
 		tool.Parent = player.Backpack
 		tool.Activated:Connect(function()
-			local mouse = player:GetMouse()
+			local mouse = NAmanage.GetMouse(player)
 			local char = player.Character
 			if not (mouse and char) then
 				return
@@ -46341,7 +46913,7 @@ cmd.add({"seizure"}, {"seizure", "Gives you a seizure"}, function()
 			Anim.AnimationId = "rbxassetid://180436148"
 		end
 		local k = getHum():LoadAnimation(Anim)
-		_na_env.ssss = LocalPlayer:GetMouse()
+		_na_env.ssss = NAmanage.GetMouse(LocalPlayer)
 		_na_env.Lzzz = false
 
 		if Lzzz == false then
@@ -46516,13 +47088,10 @@ cmd.add({"unhide", "show"}, {"show <player> (unhide)", "places the selected play
 	end
 end, true)
 
-
-if IsOnPC then
-	cmd.add({"aimbot","aimbotui","aimbotgui"},{"aimbot (aimbotui,aimbotgui)","aimbot and yeah"},function()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/uuuuuuu/refs/heads/main/NewAimbot.lua"))()
-		--loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/uuuuuuu/refs/heads/main/Aimbot.lua",true))()
-	end)
-end
+cmd.add({"aimbot","aimbotui","aimbotgui"},{"aimbot (aimbotui,aimbotgui)","aimbot and yeah"},function()
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/uuuuuuu/refs/heads/main/NewAimbot.lua"))()
+	--loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/uuuuuuu/refs/heads/main/Aimbot.lua",true))()
+end)
 
 NAmanage.toolCache = NAmanage.ensureWeakKeyTable(NAmanage.toolCache or {})
 NAmanage.toolGrabCol = NAmanage.ensureWeakKeyTable(NAmanage.toolGrabCol or {})
@@ -49179,7 +49748,7 @@ cmd.add({"commitoof", "suicide", "kys"}, {"commitoof (suicide, kys)", "Triggers 
 	Wait(2)
 
 	h:MoveTo(r.Position + r.CFrame.LookVector * 10)
-	h:ChangeState(Enum.HumanoidStateType.Jumping)
+	NAmanage.LaunchHumanoid(h, r)
 	Wait(0.45)
 
 	cmd.run({'die'})
@@ -51544,7 +52113,7 @@ cmd.add({"pathfind"},{"pathfind <player>","Follow a player using the pathfinder 
 						for _,wp in ipairs(path:GetWaypoints())do
 							if wp.Action==Enum.PathWaypointAction.Jump then
 								if hum:GetState()~=Enum.HumanoidStateType.Freefall and hum.FloorMaterial~=Enum.Material.Air then
-									hum:ChangeState(Enum.HumanoidStateType.Jumping)
+									NAmanage.LaunchHumanoid(hum)
 								end
 							end
 							hum:MoveTo(wp.Position)
@@ -51642,7 +52211,7 @@ cmd.add({"blackhole","bhole","bholepull"},{"blackhole","Makes unanchored parts t
 	if NAlib.isConnected("blackhole_force") then return DebugNotif("Blackhole already exists.") end
 
 	local UIS=SafeGetService("UserInputService")
-	local Mouse=LocalPlayer:GetMouse()
+	local Mouse=NAmanage.GetMouse(LocalPlayer)
 	local Folder=InstanceNew("Folder",workspace)
 	local Part=InstanceNew("Part",Folder)
 	local Attachment1=InstanceNew("Attachment",Part)
@@ -54828,7 +55397,7 @@ cmd.add({"unheadsit"}, {"unheadsit", "Stop the headsit command."}, function()
 	local char = getChar()
 	local hum = getHum()
 	if hum then
-		hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		NAmanage.LaunchHumanoid(hum, char and getRoot(char))
 	end
 end)
 
@@ -54869,7 +55438,7 @@ cmd.add({"wallhop"},{"wallhop","wallhop helper"},function()
 					local newYaw = originalYaw + flickAngle
 
 					root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(newYaw), 0)
-					hum:ChangeState(Enum.HumanoidStateType.Jumping)
+					NAmanage.LaunchHumanoid(hum, root)
 
 					Delay(0.1, function()
 						if root and root.Parent then
@@ -54895,7 +55464,12 @@ cmd.add({"joinvoice", "joinvc"},{"joinvoice","let's you use vc if you were suspe
 end)
 
 cmd.add({"jump"},{"jump","jump."},function()
-	getHum():ChangeState(Enum.HumanoidStateType.Jumping)
+	local char = getChar()
+	local hum = getHum(char)
+	local root = char and getRoot(char)
+	if not hum or not root then return end
+
+	NAmanage.LaunchHumanoid(hum, root)
 end)
 
 cmd.add({"loopjump","bhop"},{"loopjump (bhop)","Continuously jump."},function()
@@ -54903,7 +55477,7 @@ cmd.add({"loopjump","bhop"},{"loopjump (bhop)","Continuously jump."},function()
 	NAlib.connect("loopjump",RunService.RenderStepped:Connect(function()
 		local h=getHum()
 		if h and h:GetState()~=Enum.HumanoidStateType.Freefall and h.FloorMaterial~=Enum.Material.Air then
-			h:ChangeState(Enum.HumanoidStateType.Jumping)
+			NAmanage.LaunchHumanoid(h)
 		end
 	end))
 end)
@@ -55041,40 +55615,524 @@ cmd.add({"unheadstand"}, {"unheadstand", "Stop the headstand command."}, functio
 end)
 
 _na_env.NamelessWs = nil
+_na_env.NamelessSpeed = nil
 NAStuff.loopws = false
 
-cmd.add({"loopwalkspeed", "loopws", "lws"}, {"loopwalkspeed <number> (loopws,lws)", "Loop walkspeed"}, function(...)
-	local val = tonumber(...) or 16
-	_na_env.NamelessWs = val
-	NAStuff.loopws = true
+NAmanage.GetVelocityWalkSpeedValue = function()
+	return tonumber(_na_env.NamelessSpeed)
+end
 
+NAmanage.IsCharacterFullyNoClip = function(char)
+	if typeof(char) ~= "Instance" then
+		return false
+	end
+	local parts = 0
+	for _, part in ipairs(NAmanage.qDesc(char, "BasePart")) do
+		parts += 1
+		if NAlib.isProperty(part, "CanCollide") ~= false then
+			return false
+		end
+	end
+	return parts > 0
+end
+
+NAmanage.GetVelocityWalkSpeedMoveDirection = function(root, hum)
+	local moveVec = Vector3.zero
+	local inputUpdatedAt = tonumber(NAStuff._moveInputLastUpdate)
+	local recentlyChangedInput = inputUpdatedAt and os.clock() - inputUpdatedAt <= 0.18
+	if typeof(GetCustomMoveVector) == "function" then
+		moveVec = GetCustomMoveVector(false)
+	end
+	local flatMoveVec = typeof(moveVec) == "Vector3" and Vector3.new(moveVec.X, 0, moveVec.Z) or Vector3.zero
+	if flatMoveVec.Magnitude <= 0.05 and NAStuff._moveInputKeyboardActive ~= true and recentlyChangedInput then
+		return Vector3.zero
+	end
+	if typeof(moveVec) == "Vector3" then
+		local flatInput = flatMoveVec
+		if flatInput.Magnitude > 0.05 then
+			local basisCF = workspace.CurrentCamera and workspace.CurrentCamera.CFrame or (root and root.CFrame)
+			if basisCF then
+				local right = Vector3.new(basisCF.RightVector.X, 0, basisCF.RightVector.Z)
+				local look = Vector3.new(basisCF.LookVector.X, 0, basisCF.LookVector.Z)
+				if look.Magnitude <= 0.05 and root then
+					look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+					right = Vector3.new(root.CFrame.RightVector.X, 0, root.CFrame.RightVector.Z)
+				end
+				local desired = Vector3.zero
+				if right.Magnitude > 0.05 then
+					desired += right.Unit * flatInput.X
+				end
+				if look.Magnitude > 0.05 then
+					desired += look.Unit * -flatInput.Z
+				end
+				if desired.Magnitude > 0.05 then
+					return desired.Unit
+				end
+			end
+		end
+	end
+	if hum then
+		local humMove = NAlib.isProperty(hum, "MoveDirection")
+		if typeof(humMove) == "Vector3" then
+			local flatHum = Vector3.new(humMove.X, 0, humMove.Z)
+			if flatHum.Magnitude > 0.05 then
+				return flatHum.Unit
+			end
+		end
+	end
+	return Vector3.zero
+end
+
+NAmanage.GetVelocityWalkSpeedState = function()
+	NAStuff.velocityWalkSpeed = NAStuff.velocityWalkSpeed or {}
+	return NAStuff.velocityWalkSpeed
+end
+
+NAmanage.ClearVelocityWalkSpeedClampState = function()
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	state.clampRoot = nil
+	state.clampHum = nil
+	state.clampAxes = nil
+	state.clampPlanarDirection = nil
+end
+
+NAmanage.SetVelocityWalkSpeedClampState = function(root, hum, axes, planarDirection)
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	state.clampRoot = root
+	state.clampHum = hum
+	state.clampAxes = axes
+	if typeof(planarDirection) == "Vector3" then
+		local flatDir = Vector3.new(planarDirection.X, 0, planarDirection.Z)
+		state.clampPlanarDirection = flatDir.Magnitude > 0.05 and flatDir.Unit or nil
+	else
+		state.clampPlanarDirection = nil
+	end
+end
+
+NAmanage.ClampVelocityWalkSpeedRoot = function()
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	local root = state.clampRoot
+	local hum = state.clampHum
+	local axes = state.clampAxes
+	local planarDirection = state.clampPlanarDirection
+	if not root or not hum or not axes or not root.Parent or not hum.Parent then
+		return
+	end
+	local cap = tonumber(hum.WalkSpeed) or 0
+	if cap <= 0 then
+		return
+	end
+	local velocity = NAlib.isProperty(root, "AssemblyLinearVelocity") or root.Velocity
+	if typeof(velocity) ~= "Vector3" then
+		return
+	end
+	local newVelocity = velocity
+	if planarDirection and (math.abs(axes.X) > 0.05 or math.abs(axes.Z) > 0.05) then
+		local flatVelocity = Vector3.new(newVelocity.X, 0, newVelocity.Z)
+		local alignedSpeed = math.clamp(flatVelocity:Dot(planarDirection), -cap, cap)
+		local alignedVelocity = planarDirection * alignedSpeed
+		newVelocity = Vector3.new(alignedVelocity.X, newVelocity.Y, alignedVelocity.Z)
+	end
+	if math.abs(axes.X) > 0.05 then
+		newVelocity = Vector3.new(math.clamp(newVelocity.X, -cap, cap), newVelocity.Y, newVelocity.Z)
+	end
+	if math.abs(axes.Y) > 0.05 then
+		newVelocity = Vector3.new(newVelocity.X, math.clamp(newVelocity.Y, -cap, cap), newVelocity.Z)
+	end
+	if math.abs(axes.Z) > 0.05 then
+		newVelocity = Vector3.new(newVelocity.X, newVelocity.Y, math.clamp(newVelocity.Z, -cap, cap))
+	end
+	if newVelocity ~= velocity then
+		if not NAlib.setProperty(root, "AssemblyLinearVelocity", newVelocity) then
+			root.Velocity = newVelocity
+		end
+	end
+end
+
+NAmanage.EnsureVelocityWalkSpeedClampLoop = function()
+	if NAlib.isConnected("na_velocityws_cap") then
+		return
+	end
+	local clampSignal = RunService.PostSimulation or RunService.Heartbeat
+	NAlib.connect("na_velocityws_cap", clampSignal:Connect(function()
+		NAmanage.ClampVelocityWalkSpeedRoot()
+	end))
+end
+
+NAmanage.DestroyVelocityWalkSpeedHelper = function()
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	NAmanage.ClearVelocityWalkSpeedClampState()
+	if state.bv then
+		pcall(function()
+			state.bv:Destroy()
+		end)
+	end
+	if state.weld then
+		pcall(function()
+			state.weld:Destroy()
+		end)
+	end
+	if state.part then
+		pcall(function()
+			state.part:Destroy()
+		end)
+	end
+	state.bv = nil
+	state.weld = nil
+	state.part = nil
+	state.lastPlanarDriveRoot = nil
+	state.lastPlanarDriveSpeed = nil
+	state.lastPlanarDriveTime = nil
+	state.planarBrakeRoot = nil
+	state.planarBrakeDriveTime = nil
+	state.planarBrakeUntil = nil
+end
+
+NAmanage.SetVelocityWalkSpeedHelperActive = function(velocity, enabled, root)
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	local bv = state.bv
+	if not bv or bv.Parent == nil then
+		return
+	end
+	pcall(function()
+		bv.Velocity = velocity or Vector3.zero
+		if enabled and root then
+			local mass = math.max(tonumber(root.AssemblyMass) or 1, 1)
+			local flatSpeed = typeof(velocity) == "Vector3" and Vector3.new(velocity.X, 0, velocity.Z).Magnitude or 0
+			local verticalSpeed = typeof(velocity) == "Vector3" and math.abs(velocity.Y) or 0
+			local planarForce = math.clamp(mass * (3500 + flatSpeed * 260), 8000, 250000)
+			local verticalForce = math.clamp(mass * (4200 + verticalSpeed * 320), 10000, 300000)
+			bv.MaxForce = Vector3.new(
+				flatSpeed > 0.05 and planarForce or 0,
+				verticalSpeed > 0.05 and verticalForce or 0,
+				flatSpeed > 0.05 and planarForce or 0
+			)
+		else
+			bv.MaxForce = Vector3.zero
+		end
+	end)
+end
+
+NAmanage.MarkVelocityWalkSpeedPlanarDrive = function(root, velocity)
+	if not root or typeof(velocity) ~= "Vector3" then
+		return
+	end
+	local flatVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	if flatVelocity.Magnitude <= 0.05 then
+		return
+	end
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	state.lastPlanarDriveRoot = root
+	state.lastPlanarDriveSpeed = flatVelocity.Magnitude
+	state.lastPlanarDriveTime = os.clock()
+end
+
+NAmanage.BrakeVelocityWalkSpeedPlanarDrift = function(root, hum)
+	if not root or not root.Parent then
+		return
+	end
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	local lastTime = tonumber(state.lastPlanarDriveTime)
+	if state.lastPlanarDriveRoot ~= root or not lastTime then
+		return
+	end
+	local clockNow = os.clock()
+	if clockNow - lastTime > 0.35 then
+		return
+	end
+	if state.planarBrakeRoot ~= root or state.planarBrakeDriveTime ~= lastTime then
+		state.planarBrakeRoot = root
+		state.planarBrakeDriveTime = lastTime
+		state.planarBrakeUntil = clockNow + 0.16
+	end
+	if clockNow > (tonumber(state.planarBrakeUntil) or 0) then
+		state.planarBrakeRoot = nil
+		state.planarBrakeDriveTime = nil
+		state.planarBrakeUntil = nil
+		return
+	end
+	local floorMaterial = hum and NAlib.isProperty(hum, "FloorMaterial")
+	if floorMaterial == Enum.Material.Air then
+		return
+	end
+	local velocity = NAlib.isProperty(root, "AssemblyLinearVelocity") or root.Velocity
+	if typeof(velocity) ~= "Vector3" then
+		return
+	end
+	local flatSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	if flatSpeed <= 0.05 then
+		return
+	end
+	local expectedSpeed = math.max(
+		tonumber(state.lastPlanarDriveSpeed) or 0,
+		tonumber(hum and NAlib.isProperty(hum, "WalkSpeed")) or 0,
+		8
+	)
+	if flatSpeed > expectedSpeed * 1.45 then
+		state.planarBrakeRoot = nil
+		state.planarBrakeDriveTime = nil
+		state.planarBrakeUntil = nil
+		return
+	end
+	local newVelocity = Vector3.new(0, velocity.Y, 0)
+	if not NAlib.setProperty(root, "AssemblyLinearVelocity", newVelocity) then
+		root.Velocity = newVelocity
+	end
+end
+
+NAmanage.GetVelocityWalkSpeedWallAdjustedVelocity = function(root, desiredVelocity, ignoreList)
+	if not root or not root.Parent or typeof(desiredVelocity) ~= "Vector3" or desiredVelocity.Magnitude <= 0 then
+		return desiredVelocity
+	end
+	if NAmanage.IsCharacterFullyNoClip(root.Parent) then
+		return desiredVelocity
+	end
+	local flatDesired = Vector3.new(desiredVelocity.X, 0, desiredVelocity.Z)
+	if flatDesired.Magnitude <= 0 then
+		return desiredVelocity
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Blacklist
+	params.FilterDescendantsInstances = ignoreList or { root.Parent }
+	local rootSize = root.Size
+	local halfX = math.abs(rootSize.X) * 0.5
+	local halfZ = math.abs(rootSize.Z) * 0.5
+	local buffer = 0.12
+	local look = flatDesired.Unit
+	local localLook = root.CFrame:VectorToObjectSpace(look)
+	local reach = math.abs(localLook.X) * halfX + math.abs(localLook.Z) * halfZ
+	local stopDistance = reach + buffer
+	local direction = look * math.clamp(stopDistance + math.clamp(flatDesired.Magnitude * 0.012, 0.05, 0.25), 0.75, 2.1)
+	local origins = {
+		root.Position,
+		root.Position + Vector3.new(0, 1.5, 0),
+	}
+	for i = 1, #origins do
+		local result = workspace:Raycast(origins[i], direction, params)
+		if result and result.Instance and result.Instance.CanCollide and result.Distance <= stopDistance then
+			local flatNormal = Vector3.new(result.Normal.X, 0, result.Normal.Z)
+			if flatNormal.Magnitude > 0.05 and math.abs(result.Normal.Y) < 0.45 then
+				flatNormal = flatNormal.Unit
+				local dot = flatDesired:Dot(flatNormal)
+				if dot < 0 then
+					flatDesired = flatDesired - flatNormal * dot
+				end
+			end
+		end
+	end
+	if flatDesired.Magnitude < 0.05 then
+		return Vector3.zero
+	end
+	return Vector3.new(flatDesired.X, 0, flatDesired.Z)
+end
+
+NAmanage.EnsureVelocityWalkSpeedHelper = function(root)
+	if not root or not root.Parent then
+		return nil
+	end
+	local state = NAmanage.GetVelocityWalkSpeedState()
+	local part = state.part
+	if not part or part.Parent == nil then
+		part = InstanceNew("Part", workspace)
+		NAmanage.configureFlyHelper(part)
+		pcall(function()
+			part.Anchored = false
+			part.CFrame = root.CFrame
+		end)
+		state.part = part
+		state.weld = nil
+		state.bv = nil
+	end
+	local weld = state.weld
+	if not weld or weld.Parent ~= part then
+		if weld then
+			pcall(function()
+				weld:Destroy()
+			end)
+		end
+		weld = InstanceNew("Weld", part)
+		state.weld = weld
+	end
+	local bv = state.bv
+	if not bv or bv.Parent ~= part then
+		if bv then
+			pcall(function()
+				bv:Destroy()
+			end)
+		end
+		bv = InstanceNew("BodyVelocity", part)
+		bv.P = 1.2e4
+		bv.Velocity = Vector3.zero
+		bv.MaxForce = Vector3.zero
+		state.bv = bv
+	end
+	pcall(function()
+		if weld.Part0 ~= part then
+			weld.Part0 = part
+		end
+		if weld.Part1 ~= root then
+			weld.Part1 = root
+			part.CFrame = root.CFrame
+		end
+		weld.C0 = CFrame.new()
+	end)
+	return state
+end
+
+NAmanage.StopVelocityWalkSpeed = function()
+	NAlib.disconnect("na_velocityws_apply")
+	NAmanage.ClearVelocityWalkSpeedClampState()
+	NAmanage.DestroyVelocityWalkSpeedHelper()
+end
+
+NAmanage.StopLegacyLoopWalkSpeed = function()
 	NAlib.disconnect("loopws_apply")
 	NAlib.disconnect("loopws_char")
+end
 
+NAmanage.StartLegacyLoopWalkSpeed = function(val)
+	if not val then
+		return
+	end
+	NAmanage.StopLegacyLoopWalkSpeed()
 	local function applyWS()
 		local hum = getHum()
 		if hum then
 			hum.WalkSpeed = val
+			NAlib.disconnect("loopws_apply")
 			NAlib.connect("loopws_apply", hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-				if NAStuff.loopws and hum.WalkSpeed ~= val then
+				if NAStuff.loopws and NAStuff.SafeSpeedMethod == false and hum.Parent and hum.WalkSpeed ~= val then
 					hum.WalkSpeed = val
 				end
 			end))
 		end
 	end
-
 	applyWS()
-
 	NAlib.connect("loopws_char", LocalPlayer.CharacterAdded:Connect(function()
 		while not getHum() do Wait(.1) end
-		if NAStuff.loopws then applyWS() end
+		if NAStuff.loopws and NAStuff.SafeSpeedMethod == false then
+			applyWS()
+		end
 	end))
+end
+
+NAmanage.RefreshVelocityWalkSpeed = function()
+	local targetSpeed = NAmanage.GetVelocityWalkSpeedValue()
+	if not targetSpeed or targetSpeed <= 0 then
+		NAmanage.StopVelocityWalkSpeed()
+		return
+	end
+	if NAlib.isConnected("na_velocityws_apply") then
+		return
+	end
+	NAmanage.EnsureVelocityWalkSpeedClampLoop()
+	NAlib.connect("na_velocityws_apply", RunService.PreSimulation:Connect(function()
+		local speed = NAmanage.GetVelocityWalkSpeedValue()
+		if not speed or speed <= 0 then
+			NAmanage.ClearVelocityWalkSpeedClampState()
+			NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.zero, false)
+			return
+		end
+		local hum = getHum()
+		if not hum or hum.Health <= 0 or hum.Sit then
+			NAmanage.ClearVelocityWalkSpeedClampState()
+			NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.zero, false)
+			return
+		end
+		local root = hum.RootPart or getRoot(hum.Parent)
+		if not root then
+			NAmanage.ClearVelocityWalkSpeedClampState()
+			NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.zero, false)
+			return
+		end
+		if FLYING and NAmanage._state and NAmanage._state.mode ~= "none" then
+			NAmanage.ClearVelocityWalkSpeedClampState()
+			NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.zero, false, root)
+			return
+		end
+		local helperState = NAmanage.EnsureVelocityWalkSpeedHelper(root)
+		if not helperState then
+			return
+		end
+		if hum:GetState() == Enum.HumanoidStateType.Climbing then
+			local climbInput = hum.MoveDirection.Y
+			if math.abs(climbInput) <= 0.05 then
+				local mv = GetCustomMoveVector()
+				if math.abs(mv.Y) > 0.05 then
+					climbInput = mv.Y
+				else
+					climbInput = -mv.Z
+				end
+			end
+			if math.abs(climbInput) <= 0.05 then
+				NAmanage.ClearVelocityWalkSpeedClampState()
+				NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.zero, false, root)
+				return
+			end
+			NAmanage.SetVelocityWalkSpeedClampState(root, hum, Vector3.new(0, 1, 0))
+			NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.new(0, math.clamp(climbInput, -1, 1) * speed, 0), true, root)
+			return
+		end
+		local flatDirection = NAmanage.GetVelocityWalkSpeedMoveDirection(root, hum)
+		if flatDirection.Magnitude <= 0 then
+			NAmanage.ClearVelocityWalkSpeedClampState()
+			NAmanage.SetVelocityWalkSpeedHelperActive(Vector3.zero, false, root)
+			NAmanage.BrakeVelocityWalkSpeedPlanarDrift(root, hum)
+			return
+		end
+		local desiredVelocity = flatDirection * speed
+		local adjustedVelocity = NAmanage.GetVelocityWalkSpeedWallAdjustedVelocity(root, desiredVelocity, {
+			hum.Parent,
+			helperState.part,
+		})
+		NAmanage.SetVelocityWalkSpeedClampState(root, hum, Vector3.new(1, 0, 1), adjustedVelocity)
+		NAmanage.SetVelocityWalkSpeedHelperActive(adjustedVelocity, adjustedVelocity.Magnitude > 0.05, root)
+		NAmanage.MarkVelocityWalkSpeedPlanarDrive(root, adjustedVelocity)
+	end))
+end
+
+NAmanage.SyncSpeedMethodState = function()
+	NAmanage.StopVelocityWalkSpeed()
+	NAmanage.StopLegacyLoopWalkSpeed()
+	if NAStuff.SafeSpeedMethod ~= false then
+		if NAStuff.loopws and tonumber(_na_env.NamelessWs) then
+			_na_env.NamelessSpeed = tonumber(_na_env.NamelessWs)
+		end
+		NAStuff.loopws = false
+		_na_env.NamelessWs = nil
+		NAmanage.RefreshVelocityWalkSpeed()
+		return
+	end
+	if NAStuff.loopws and tonumber(_na_env.NamelessWs) then
+		NAmanage.StartLegacyLoopWalkSpeed(tonumber(_na_env.NamelessWs))
+	elseif tonumber(_na_env.NamelessSpeed) then
+		NAmanage.ApplyWalkSpeed(tonumber(_na_env.NamelessSpeed))
+	end
+end
+
+cmd.add({"loopwalkspeed", "loopws", "lws"}, {"loopwalkspeed <number> (loopws,lws)", "Loop walkspeed"}, function(...)
+	local val = tonumber(...) or 16
+	if NAStuff.SafeSpeedMethod ~= false then
+		_na_env.NamelessSpeed = val
+		NAStuff.loopws = false
+		_na_env.NamelessWs = nil
+		NAmanage.RefreshVelocityWalkSpeed()
+		return
+	end
+	_na_env.NamelessWs = val
+	NAStuff.loopws = true
+	NAmanage.StartLegacyLoopWalkSpeed(val)
 end, true)
 
-cmd.add({"unloopwalkspeed", "unloopws", "unlws"}, {"unloopwalkspeed (unloopws,unlws)", "Disable loop walkspeed"}, function()
+cmd.add({"unloopwalkspeed", "unloopws", "unlws", "unspeed"}, {"unloopwalkspeed", "Disable loop walkspeed"}, function()
+	if NAStuff.SafeSpeedMethod ~= false then
+		_na_env.NamelessSpeed = nil
+		NAmanage.StopVelocityWalkSpeed()
+		return
+	end
 	NAStuff.loopws = false
-	NAlib.disconnect("loopws_apply")
-	NAlib.disconnect("loopws_char")
+	_na_env.NamelessWs = nil
+	NAmanage.StopLegacyLoopWalkSpeed()
 end)
 
 _na_env.NamelessJP = nil
@@ -57401,7 +58459,10 @@ cmd.add({"suslay", "laysus"}, {"suslay (laysus)", "Lay down in a suspicious way"
 end)
 
 cmd.add({"unsuslay"}, {"unsuslay", "Stand up from the sussy lay"}, function()
-	getHum():ChangeState(Enum.HumanoidStateType.Jumping)
+	local hum = getHum()
+	if hum then
+		NAmanage.LaunchHumanoid(hum)
+	end
 
 	if susTrack then
 		susTrack:Stop()
@@ -57470,7 +58531,7 @@ hugModeEnabled = false
 
 cmd.add({"hug", "clickhug"}, {"hug (clickhug)", "huggies time (click on a target to hug)"}, function()
 	if IsR6() then
-		local mouse = LocalPlayer:GetMouse()
+		local mouse = NAmanage.GetMouse(LocalPlayer)
 
 		NAlib.disconnect("hug_toggle")
 		NAlib.disconnect("hug_side")
@@ -57615,7 +58676,7 @@ cmd.add({"hug", "clickhug"}, {"hug (clickhug)", "huggies time (click on a target
 			sideToggleButton.Text = (hugFromFront and "Hug Side: Front") or "Hug Side: Back"
 		end))
 
-		NAlib.connect("hug_click", LocalPlayer:GetMouse().Button1Down:Connect(function()
+		NAlib.connect("hug_click", mouse.Button1Down:Connect(function()
 			if not hugModeEnabled then return end
 			local target = mouse.Target
 			if target and target.Parent then
@@ -58041,8 +59102,25 @@ end)
 
 bringc = {}
 
-cmd.add({"cbring", "clientbring", "clientb"}, {"cbring <player>", "Brings the player once on your client"}, function(...)
-	local username = (...)
+NAmanage.parseBringDistance=function(args, defaultDistance)
+	local distance = tonumber(args[#args])
+	if distance then
+		table.remove(args, #args)
+		return math.clamp(distance, 0, 1000)
+	end
+	return defaultDistance or 0
+end
+
+NAmanage.bringOffsetCFrame=function(cf, distance)
+	if not cf then return nil end
+	distance = tonumber(distance) or 0
+	return cf + cf.LookVector * distance
+end
+
+cmd.add({"cbring", "clientbring", "clientb"}, {"cbring <player> [distance]", "Brings the player once on your client"}, function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 3)
+	local username = args[1]
 	local target = getPlr(username)
 	if #target == 0 then return end
 	local localChar = getChar()
@@ -58054,14 +59132,16 @@ cmd.add({"cbring", "clientbring", "clientb"}, {"cbring <player>", "Brings the pl
 		if targetChar then
 			local targetRoot = getRoot(targetChar)
 			if targetRoot then
-				targetRoot.CFrame = localRoot.CFrame + localRoot.CFrame.LookVector * 3
+				targetRoot.CFrame = NAmanage.bringOffsetCFrame(localRoot.CFrame, distance)
 			end
 		end
 	end
 end, true)
 
-cmd.add({"loopcbring", "loppclientb", "loopclientbring", "lcbring", "lclientb"}, {"loopcbring <player>", "Continuously brings the player on your client"}, function(...)
-	local username = (...)
+cmd.add({"loopcbring", "loppclientb", "loopclientbring", "lcbring", "lclientb"}, {"loopcbring <player> [distance]", "Continuously brings the player on your client"}, function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 3)
+	local username = args[1]
 	local target = getPlr(username)
 	if #target == 0 then return end
 	for _, conn in ipairs(bringc) do
@@ -58087,7 +59167,7 @@ cmd.add({"loopcbring", "loppclientb", "loopclientbring", "lcbring", "lclientb"},
 				local targetRoot = getRoot(targetChar)
 				local localRoot = getRoot(localChar)
 				if targetRoot and localRoot then
-					targetRoot.CFrame = localRoot.CFrame + localRoot.CFrame.LookVector * 3
+					targetRoot.CFrame = NAmanage.bringOffsetCFrame(localRoot.CFrame, distance)
 				end
 			end
 		end)
@@ -62720,25 +63800,35 @@ cmd.add({"gotopartclass", "gpc", "gotopartc", "gotoprtc"}, {"gotopartclass {clas
 	end)
 end, true)
 
-cmd.add({"bringpart", "bpart", "bprt"}, {"bringpart {partname} (bpart, bprt)", "Brings a part to your character by name"}, function(...)
-	local partName = Concat({...}, " "):lower()
+cmd.add({"bringpart", "bpart", "bprt"}, {"bringpart {partname} [distance] (bpart, bprt)", "Brings a part to your character by name"}, function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 0)
+	local partName = Concat(args, " "):lower()
+	if partName == "" then return end
+	local char = getChar()
+	if not char then return end
+	local root = getRoot(char)
+	local pivot = NAmanage.bringOffsetCFrame((root and root.CFrame) or char:GetPivot(), distance)
+	if not pivot then return end
 
 	for _, part in ipairs(NAmanage.fastWorkspaceMatches("BasePart", partName, "exact")) do
 		if part.Name:lower() == partName then
-			if getChar() then
-				part:PivotTo(getChar():GetPivot())
-			end
+			part:PivotTo(pivot)
 		end
 	end
 end, true)
 
-cmd.add({"bringpartfind","bpartfind","bprtfind"},{"bringpartfind {name} (bpartfind, bprtfind)","Brings all parts containing name to your character"},function(...)
-	local name = Concat({...}," "):lower()
+cmd.add({"bringpartfind","bpartfind","bprtfind"},{"bringpartfind {name} [distance] (bpartfind, bprtfind)","Brings all parts containing name to your character"},function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 0)
+	local name = Concat(args," "):lower()
 	if name == "" then return end
 
 	local char = getChar()
 	if not char then return end
-	local pivot = char:GetPivot()
+	local root = getRoot(char)
+	local pivot = NAmanage.bringOffsetCFrame((root and root.CFrame) or char:GetPivot(), distance)
+	if not pivot then return end
 
 	for _, part in ipairs(NAmanage.fastWorkspaceMatches("BasePart", name, "contains")) do
 		local n = part.Name:lower()
@@ -62748,25 +63838,35 @@ cmd.add({"bringpartfind","bpartfind","bprtfind"},{"bringpartfind {name} (bpartfi
 	end
 end,true)
 
-cmd.add({"bringmodel", "bmodel"}, {"bringmodel {modelname} (bmodel)", "Brings a model to your character by name"}, function(...)
-	local modelName = Concat({...}, " "):lower()
+cmd.add({"bringmodel", "bmodel"}, {"bringmodel {modelname} [distance] (bmodel)", "Brings a model to your character by name"}, function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 0)
+	local modelName = Concat(args, " "):lower()
+	if modelName == "" then return end
+	local char = getChar()
+	if not char then return end
+	local root = getRoot(char)
+	local pivot = NAmanage.bringOffsetCFrame((root and root.CFrame) or char:GetPivot(), distance)
+	if not pivot then return end
 
 	for _, model in ipairs(NAmanage.fastWorkspaceMatches("Model", modelName, "exact")) do
 		if model.Name:lower() == modelName then
-			if getChar() then
-				model:PivotTo(getChar():GetPivot())
-			end
+			model:PivotTo(pivot)
 		end
 	end
 end, true)
 
-cmd.add({"bringmodelfind","bmodelfind"},{"bringmodelfind {name} (bmodelfind)","Brings all models whose name contains the given text to your character"},function(...)
-	local name = Concat({...}," "):lower()
+cmd.add({"bringmodelfind","bmodelfind"},{"bringmodelfind {name} [distance] (bmodelfind)","Brings all models whose name contains the given text to your character"},function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 0)
+	local name = Concat(args," "):lower()
 	if name == "" then return end
 
 	local char = getChar()
 	if not char then return end
-	local pivot = char:GetPivot()
+	local root = getRoot(char)
+	local pivot = NAmanage.bringOffsetCFrame((root and root.CFrame) or char:GetPivot(), distance)
+	if not pivot then return end
 
 	for _, model in ipairs(NAmanage.fastWorkspaceMatches("Model", name, "contains")) do
 		local n = model.Name:lower()
@@ -62776,8 +63876,9 @@ cmd.add({"bringmodelfind","bmodelfind"},{"bringmodelfind {name} (bmodelfind)","B
 	end
 end,true)
 
-cmd.add({"bringfolder","bfldr"},{"bringfolder {folderName} [partName] (bfldr)","Brings all parts in a folder or a specified part"},function(...)
+cmd.add({"bringfolder","bfldr"},{"bringfolder {folderName} [partName] [distance] (bfldr)","Brings all parts in a folder or a specified part"},function(...)
 	local raw = {...}
+	local distance = NAmanage.parseBringDistance(raw, 0)
 	if #raw == 0 then return end
 	local lower = {}
 	for i=1,#raw do lower[i] = tostring(raw[i]):lower() end
@@ -62806,7 +63907,9 @@ cmd.add({"bringfolder","bfldr"},{"bringfolder {folderName} [partName] (bfldr)","
 	if not folder then return end
 	local char = getChar()
 	if not char then return end
-	local pivot = char:GetPivot()
+	local root = getRoot(char)
+	local pivot = NAmanage.bringOffsetCFrame((root and root.CFrame) or char:GetPivot(), distance)
+	if not pivot then return end
 	for _,desc in ipairs(NAmanage.qDesc(folder, "BasePart")) do
 		local ok = true
 		if partFilter and partFilter ~= "" then
@@ -63993,9 +65096,12 @@ NAmanage.ESP_LocatorEnableGui = function(force)
 			root = ch and getRoot(ch)
 		end
 
-		local entries = NAStuff.partESPEntries or {}
+		local entries = type(NAStuff.partESPEntries) == "table" and NAStuff.partESPEntries or {}
 		local processed = 0
 		while processed < perStep do
+			if iterKey ~= nil and entries[iterKey] == nil then
+				iterKey = nil
+			end
 			local key, entry = next(entries, iterKey)
 			if key == nil then
 				key, entry = next(entries, nil)
@@ -64264,9 +65370,12 @@ NAmanage.ESP_LocatorEnableDrawing = function(force)
 			root = ch and getRoot(ch)
 		end
 
-		local entries = NAStuff.partESPEntries or {}
+		local entries = type(NAStuff.partESPEntries) == "table" and NAStuff.partESPEntries or {}
 		local processed = 0
 		while processed < perStep do
+			if iterKey ~= nil and entries[iterKey] == nil then
+				iterKey = nil
+			end
 			local key, entry = next(entries, iterKey)
 			if key == nil then
 				key, entry = next(entries, nil)
@@ -64617,6 +65726,9 @@ NAmanage.ESP_PlayerLocatorEnableGui = function(force)
 
 		local processed = 0
 		while processed < perStep do
+			if iterKey ~= nil and espCONS[iterKey] == nil then
+				iterKey = nil
+			end
 			local model, data = next(espCONS, iterKey)
 			if model == nil then
 				model, data = next(espCONS, nil)
@@ -64879,6 +65991,9 @@ NAmanage.ESP_PlayerLocatorEnableDrawing = function(force)
 
 		local processed = 0
 		while processed < perStep do
+			if iterKey ~= nil and espCONS[iterKey] == nil then
+				iterKey = nil
+			end
 			local model, data = next(espCONS, iterKey)
 			if model == nil then
 				model, data = next(espCONS, nil)
@@ -67502,7 +68617,7 @@ cmd.add({"breakcars", "bcars"}, {"breakcars (bcars)", "Breaks any car"}, functio
 	DebugNotif("Car breaker loaded, sit on a vehicle and be the driver")
 
 	local Player = Players.LocalPlayer
-	local Mouse = Player:GetMouse()
+	local Mouse = NAmanage.GetMouse(Player)
 
 	local Folder = InstanceNew("Folder")
 	Folder.Parent = workspace
@@ -67659,7 +68774,7 @@ cmd.add({"infjump", "infinitejump"}, {"infjump (infinitejump)", "Enables infinit
 		NAlib.connect("infjump_jump", UserInputService.JumpRequest:Connect(function()
 			if not debounce and humanoid:GetState() ~= Enum.HumanoidStateType.Dead then
 				debounce = true
-				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+				NAmanage.LaunchHumanoid(humanoid)
 
 				Delay(0.25, function()
 					debounce = false
@@ -67690,7 +68805,10 @@ cmd.add({"flyjump"},{"flyjump","Allows you to hold space to fly up"},function()
 
 	NAlib.disconnect("flyjump")
 	NAlib.connect("flyjump", UserInputService.JumpRequest:Connect(function()
-		getHum():ChangeState(Enum.HumanoidStateType.Jumping)
+		local hum = getHum()
+		if hum then
+			NAmanage.LaunchHumanoid(hum)
+		end
 	end))
 end)
 
@@ -69510,9 +70628,13 @@ end)
 cmd.add({"ws", "speed", "walkspeed"}, {"walkspeed <number> (speed,ws)", "Sets your WalkSpeed"}, function(...)
 	local a = {...}
 	local s = tonumber(a[2] or a[1]) or 16
-	local h = getHum()
-	if s and h then
-		h.WalkSpeed = s
+	if s then
+		_na_env.NamelessSpeed = s
+		if NAStuff.SafeSpeedMethod ~= false then
+			NAmanage.RefreshVelocityWalkSpeed()
+		else
+			NAmanage.ApplyWalkSpeed(s)
+		end
 	end
 end, true)
 
@@ -71090,15 +72212,18 @@ cmd.add({"npcjumppower","npcjp"},{"npcjumppower <power>","Sets all NPC JumpPower
 	end
 end,true)
 
-cmd.add({"bringnpcs"}, {"bringnpcs", "Brings NPCs"}, function()
+cmd.add({"bringnpcs"}, {"bringnpcs [distance]", "Brings NPCs"}, function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 0)
 	local npcs = {}
 
 	local function disappear(hum)
 		if hum:IsA("Humanoid") and CheckIfNPC(hum.Parent) then
 			Insert(npcs,{hum,hum.HipHeight})
 			local rootPart = getRoot(hum.Parent)
-			if rootPart then
-				rootPart.CFrame = getRoot(LocalPlayer.Character).CFrame
+			local localRoot = LocalPlayer.Character and getRoot(LocalPlayer.Character)
+			if rootPart and localRoot then
+				rootPart.CFrame = NAmanage.bringOffsetCFrame(localRoot.CFrame, distance)
 			end
 		end
 	end
@@ -71108,7 +72233,9 @@ cmd.add({"bringnpcs"}, {"bringnpcs", "Brings NPCs"}, function()
 end)
 
 npcCache = {}
-cmd.add({"loopbringnpcs", "lbnpcs"}, {"loopbringnpcs (lbnpcs)", "Loops NPC bringing"}, function()
+cmd.add({"loopbringnpcs", "lbnpcs", "loopbnpcs", "lbringnpcs", "lbringnpc", "loopbringnpc"}, {"loopbringnpcs [distance] (lbnpcs, loopbnpcs, lbringnpcs)", "Loops NPC bringing"}, function(...)
+	local args = {...}
+	local distance = NAmanage.parseBringDistance(args, 0)
 	if NAlib.isConnected("loopbringnpcs") then NAlib.disconnect("loopbringnpcs") end
 	table.clear(npcCache)
 	for _, hum in ipairs(NAmanage.qDesc(workspace, "Humanoid")) do
@@ -71124,7 +72251,7 @@ cmd.add({"loopbringnpcs", "lbnpcs"}, {"loopbringnpcs (lbnpcs)", "Loops NPC bring
 				local rootPart = getRoot(model)
 				local localRoot = LocalPlayer.Character and getRoot(LocalPlayer.Character)
 				if rootPart and localRoot then
-					rootPart.CFrame = localRoot.CFrame
+					rootPart.CFrame = NAmanage.bringOffsetCFrame(localRoot.CFrame, distance)
 				end
 				SpawnCall(function()
 					for _, part in ipairs(NAmanage.qDesc(model, "BasePart")) do
@@ -71138,7 +72265,7 @@ cmd.add({"loopbringnpcs", "lbnpcs"}, {"loopbringnpcs (lbnpcs)", "Loops NPC bring
 	end))
 end)
 
-cmd.add({"unloopbringnpcs", "unlbnpcs"}, {"unloopbringnpcs (unlbnpcs)", "Stops NPC bring loop"}, function()
+cmd.add({"unloopbringnpcs", "unlbnpcs", "unloopbnpcs", "unlbringnpcs", "unlbringnpc", "unloopbringnpc"}, {"unloopbringnpcs (unlbnpcs, unloopbnpcs, unlbringnpcs)", "Stops NPC bring loop"}, function()
 	NAlib.disconnect("loopbringnpcs")
 end)
 
@@ -71203,8 +72330,8 @@ cmd.add({"actnpc"}, {"actnpc", "Start acting like an NPC"}, function()
 
 		if hum.Sit then
 			DebugNotif("Sitting detected — jumping to escape", 1.5)
-			hum.Sit = false
-			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+			hum.Sit = true
+			NAmanage.LaunchHud(hum, root)
 			NPCControl._jumpCooldown = 1.5
 			return
 		end
@@ -71240,7 +72367,7 @@ cmd.add({"actnpc"}, {"actnpc", "Start acting like an NPC"}, function()
 			if part.CanCollide and not isPlayerChar then
 				if hum:GetState() == Enum.HumanoidStateType.Running then
 					DebugNotif("Obstacle detected — jumping", 1.5)
-					hum:ChangeState(Enum.HumanoidStateType.Jumping)
+					NAmanage.LaunchHumanoid(hum, root)
 					NPCControl._jumpCooldown = 1.5
 				end
 			end
@@ -71266,7 +72393,7 @@ cmd.add({"clickkillnpc", "cknpc"}, {"clickkillnpc (cknpc)", "Click on an NPC to 
 	if NAStuff.clickkillUI then NAStuff.clickkillUI:Destroy() end
 	NAlib.disconnect("clickkill_mouse")
 
-	local Mouse = player:GetMouse()
+	local Mouse = NAmanage.GetMouse(player)
 
 	NAStuff.clickkillUI = InstanceNew("ScreenGui")
 	NAgui.NaProtectUI(NAStuff.clickkillUI)
@@ -71358,7 +72485,7 @@ cmd.add({"clickvoidnpc", "cvnpc"}, {"clickvoidnpc (cvnpc)", "Click to void NPCs"
 		button.Text = clickVoidEnabled and "ClickVoid: ON" or "ClickVoid: OFF"
 	end)
 
-	local mouse = player:GetMouse()
+	local mouse = NAmanage.GetMouse(player)
 	NAlib.connect("clickvoid_mouse", mouse.Button1Down:Connect(function()
 		if not clickVoidEnabled then return end
 
@@ -71385,7 +72512,7 @@ cmd.add({"clicknpcws","cnpcws"},{"clicknpcws","Click on an NPC to set its WalkSp
 	if clickSpeedUI then clickSpeedUI:Destroy() end
 	NAlib.disconnect("clickspeed_mouse")
 	local player=Players.LocalPlayer
-	local mouse=player:GetMouse()
+	local mouse=NAmanage.GetMouse(player)
 	clickSpeedUI=InstanceNew("ScreenGui")
 	NAgui.NaProtectUI(clickSpeedUI)
 	local btn=InstanceNew("TextButton")
@@ -71449,7 +72576,7 @@ cmd.add({"clicknpcjp","cnpcjp"},{"clicknpcjp","Click on an NPC to set its JumpPo
 	if clickJumpUI then clickJumpUI:Destroy() end
 	NAlib.disconnect("clickjump_mouse")
 	local player=Players.LocalPlayer
-	local mouse=player:GetMouse()
+	local mouse=NAmanage.GetMouse(player)
 	clickJumpUI=InstanceNew("ScreenGui")
 	NAgui.NaProtectUI(clickJumpUI)
 	local btn=InstanceNew("TextButton")
@@ -72144,6 +73271,7 @@ do
 
 		ctrl.name = name;
 		ctrl.config = config or ctrl.config or {};
+		ctrl.axis = (ctrl.config.axis == "X" or ctrl.config.axis == "Horizontal") and "X" or "Y";
 		ctrl.step = ctrl.config.step or ctrl.step or registry.step;
 		ctrl.repeatDelay = ctrl.config.repeatDelay or ctrl.repeatDelay or registry.repeatDelay;
 		ctrl.repeatRate = ctrl.config.repeatRate or ctrl.repeatRate or registry.repeatRate;
@@ -72181,18 +73309,51 @@ do
 			if not target then
 				return 0;
 			end;
+			if ctrl.config and type(ctrl.config.getVisibleSpace) == "function" then
+				local ok, result = pcall(ctrl.config.getVisibleSpace, ctrl, target);
+				if ok and type(result) == "number" then
+					return math.max(0, result);
+				end;
+			end;
 			local logicalSize = NAmanage.GetLogicalAbsoluteSize and NAmanage.GetLogicalAbsoluteSize(target) or nil;
 			if logicalSize then
-				return math.max(0, logicalSize.Y or 0);
+				return math.max(0, (ctrl.axis == "X" and logicalSize.X or logicalSize.Y) or 0);
 			end;
-			return math.max(0, (target.AbsoluteSize.Y or 0) / registry.getScale());
+			local absSize = ctrl.axis == "X" and target.AbsoluteSize.X or target.AbsoluteSize.Y;
+			return math.max(0, (absSize or 0) / registry.getScale());
+		end;
+
+		function ctrl.getTotalSpace(target)
+			if not target then
+				return 0;
+			end;
+			if ctrl.config and type(ctrl.config.getTotalSpace) == "function" then
+				local ok, result = pcall(ctrl.config.getTotalSpace, ctrl, target);
+				if ok and type(result) == "number" then
+					return math.max(0, result);
+				end;
+			end;
+			return math.max(ctrl.getVisibleSpace(target), tonumber((ctrl.axis == "X" and target.CanvasSize.X or target.CanvasSize.Y).Offset) or 0);
+		end;
+
+		function ctrl.getPosition(target)
+			if not target then
+				return 0;
+			end;
+			if ctrl.config and type(ctrl.config.getPosition) == "function" then
+				local ok, result = pcall(ctrl.config.getPosition, ctrl, target);
+				if ok and type(result) == "number" then
+					return result;
+				end;
+			end;
+			return tonumber(ctrl.axis == "X" and target.CanvasPosition.X or target.CanvasPosition.Y) or 0;
 		end;
 
 		function ctrl.getMaxPosition(target)
 			if not target then
 				return 0;
 			end;
-			local total = tonumber(target.CanvasSize.Y.Offset) or 0;
+			local total = ctrl.getTotalSpace(target);
 			local visible = ctrl.getVisibleSpace(target);
 			return math.max(0, total - visible);
 		end;
@@ -72206,6 +73367,7 @@ do
 				target.ScrollBarThickness = 0;
 				target.ScrollBarImageTransparency = 1;
 				target.VerticalScrollBarInset = Enum.ScrollBarInset.None;
+				target.HorizontalScrollBarInset = Enum.ScrollBarInset.None;
 			end);
 			if ctrl.config and ctrl.config.applyTargetDefaults then
 				pcall(ctrl.config.applyTargetDefaults, ctrl, target);
@@ -72273,7 +73435,7 @@ do
 				pcall(ctrl.config.layoutForTarget, ctrl, target, widgets);
 			end;
 
-			if not (target and target.Parent and target.Visible ~= false and bar and bar.Parent and track and thumb) then
+			if not (target and target.Parent and (target.Visible ~= false or (ctrl.config and ctrl.config.allowHiddenTarget == true)) and bar and bar.Parent and track and thumb) then
 				ctrl.hide();
 				return;
 			end;
@@ -72294,47 +73456,58 @@ do
 			end;
 
 			local visible = ctrl.getVisibleSpace(target);
-			local total = math.max(visible, tonumber(target.CanvasSize.Y.Offset) or 0);
+			local total = math.max(visible, ctrl.getTotalSpace(target));
 			local maxPos = math.max(0, total - visible);
-			local trackHeight = math.max(0, track.AbsoluteSize.Y or 0);
-			local canScroll = maxPos > 1 and visible > 0 and trackHeight > 0;
+			local trackSize = math.max(0, ctrl.axis == "X" and (track.AbsoluteSize.X or 0) or (track.AbsoluteSize.Y or 0));
+			local canScroll = maxPos > 1 and visible > 0 and trackSize > 0;
 			bar.Visible = canScroll;
 			if not canScroll then
 				return;
 			end;
 
-			local currentY = math.clamp(tonumber(target.CanvasPosition.Y) or 0, 0, maxPos);
-			local upEnabled = currentY > 0.5;
-			local downEnabled = currentY < (maxPos - 0.5);
+			local currentPos = math.clamp(tonumber(ctrl.getPosition(target)) or 0, 0, maxPos);
+			local upEnabled = currentPos > 0.5;
+			local downEnabled = currentPos < (maxPos - 0.5);
 			upButton.BackgroundTransparency = upEnabled and 0.15 or 0.55;
 			downButton.BackgroundTransparency = downEnabled and 0.15 or 0.55;
 			upButton.TextTransparency = upEnabled and 0 or 0.5;
 			downButton.TextTransparency = downEnabled and 0 or 0.5;
 
 			local minThumb = tonumber(ctrl.config.minThumb) or (IsOnMobile and 28 or 18);
-				local thumbHeight = trackHeight;
+				local thumbMainSize = trackSize;
 				if total > 0 then
-					local maxThumb = math.max(1, trackHeight);
+					local maxThumb = math.max(1, trackSize);
 					local minSafe = math.min(math.max(1, minThumb), maxThumb);
-					local rawThumb = trackHeight * (visible / total);
-					thumbHeight = math.floor(math.clamp(rawThumb, minSafe, maxThumb) + 0.5);
+					local rawThumb = trackSize * (visible / total);
+					thumbMainSize = math.floor(math.clamp(rawThumb, minSafe, maxThumb) + 0.5);
 				end;
-			local travel = math.max(0, trackHeight - thumbHeight);
-			local percent = maxPos > 0 and (currentY / maxPos) or 0;
-			thumb.Size = UDim2.new(1, 0, 0, thumbHeight);
-			thumb.Position = UDim2.new(0, 0, 0, math.floor(travel * percent + 0.5));
+			local travel = math.max(0, trackSize - thumbMainSize);
+			local percent = maxPos > 0 and (currentPos / maxPos) or 0;
+			if ctrl.axis == "X" then
+				thumb.Size = UDim2.new(0, thumbMainSize, 1, 0);
+				thumb.Position = UDim2.new(0, math.floor(travel * percent + 0.5), 0, 0);
+			else
+				thumb.Size = UDim2.new(1, 0, 0, thumbMainSize);
+				thumb.Position = UDim2.new(0, 0, 0, math.floor(travel * percent + 0.5));
+			end;
 		end;
 
-		function ctrl.scrollTo(y)
+		function ctrl.scrollTo(pos)
 			local target = ctrl.getTarget();
 			if not target then
 				ctrl.hide();
 				return;
 			end;
 			local maxPos = ctrl.getMaxPosition(target);
-			local nextY = math.clamp(tonumber(y) or 0, 0, maxPos);
+			local nextPos = math.clamp(tonumber(pos) or 0, 0, maxPos);
+			if ctrl.config and type(ctrl.config.setPosition) == "function" then
+				pcall(ctrl.config.setPosition, ctrl, target, nextPos);
+				ctrl.scheduleRefresh();
+				return;
+			end;
 			local currentX = tonumber(target.CanvasPosition.X) or 0;
-			target.CanvasPosition = Vector2.new(currentX, nextY);
+			local currentY = tonumber(target.CanvasPosition.Y) or 0;
+			target.CanvasPosition = ctrl.axis == "X" and Vector2.new(nextPos, currentY) or Vector2.new(currentX, nextPos);
 			ctrl.scheduleRefresh();
 		end;
 
@@ -72344,7 +73517,8 @@ do
 				ctrl.hide();
 				return;
 			end;
-			ctrl.scrollTo((tonumber(target.CanvasPosition.Y) or 0) + (tonumber(delta) or 0));
+			local current = ctrl.getPosition(target);
+			ctrl.scrollTo((tonumber(current) or 0) + (tonumber(delta) or 0));
 		end;
 
 		function ctrl.pageStep(direction)
@@ -72484,18 +73658,18 @@ do
 					if not input or not isPressInput(input.UserInputType) then
 						return;
 					end;
-					local y = input.Position and input.Position.Y;
-					if not y then
+					local pointerPos = input.Position and (ctrl.axis == "X" and input.Position.X or input.Position.Y);
+					if not pointerPos then
 						return;
 					end;
-					local thumbTop = thumb.AbsolutePosition.Y;
-					local thumbBottom = thumbTop + thumb.AbsoluteSize.Y;
-					if y >= thumbTop and y <= thumbBottom then
+					local thumbStart = ctrl.axis == "X" and thumb.AbsolutePosition.X or thumb.AbsolutePosition.Y;
+					local thumbEnd = thumbStart + (ctrl.axis == "X" and thumb.AbsoluteSize.X or thumb.AbsoluteSize.Y);
+					if pointerPos >= thumbStart and pointerPos <= thumbEnd then
 						return;
 					end;
 					ctrl.stopArrowHold();
 					ctrl.stopThumbDrag();
-					if y < thumbTop then
+					if pointerPos < thumbStart then
 						ctrl.pageStep(-1);
 					else
 						ctrl.pageStep(1);
@@ -72513,7 +73687,7 @@ do
 					local touchLocked = false;
 					local moveConn;
 					local endConn;
-					local offsetY = input.Position and (input.Position.Y - thumb.AbsolutePosition.Y) or 0;
+					local offset = input.Position and ((ctrl.axis == "X" and input.Position.X or input.Position.Y) - (ctrl.axis == "X" and thumb.AbsolutePosition.X or thumb.AbsolutePosition.Y)) or 0;
 					local touchMode = ctrl.name .. "-scroll-thumb";
 
 					if pointer and NAgui.tryLockTouchGesture and not NAgui.tryLockTouchGesture(bar, touchMode, pointer) then
@@ -72554,10 +73728,14 @@ do
 							stop();
 							return;
 						end;
-						local trackHeight = math.max(0, track.AbsoluteSize.Y - thumb.AbsoluteSize.Y);
-						local rawY = changedInput.Position.Y - track.AbsolutePosition.Y - offsetY;
-						local thumbY = math.clamp(rawY, 0, trackHeight);
-						local percent = trackHeight > 0 and (thumbY / trackHeight) or 0;
+						local trackMain = ctrl.axis == "X" and track.AbsoluteSize.X or track.AbsoluteSize.Y;
+						local thumbMain = ctrl.axis == "X" and thumb.AbsoluteSize.X or thumb.AbsoluteSize.Y;
+						local trackTravel = math.max(0, trackMain - thumbMain);
+						local inputPos = ctrl.axis == "X" and changedInput.Position.X or changedInput.Position.Y;
+						local trackPos = ctrl.axis == "X" and track.AbsolutePosition.X or track.AbsolutePosition.Y;
+						local rawPos = inputPos - trackPos - offset;
+						local thumbPos = math.clamp(rawPos, 0, trackTravel);
+						local percent = trackTravel > 0 and (thumbPos / trackTravel) or 0;
 						ctrl.scrollTo(percent * ctrl.getMaxPosition(target));
 					end);
 					endConn = UserInputService.InputEnded:Connect(function(endedInput)
@@ -74556,7 +75734,7 @@ NAgui.resizeable = function(ui, min, max)
 	local mouse
 	pcall(function()
 		if Players and Players.LocalPlayer then
-			mouse = Players.LocalPlayer:GetMouse()
+			mouse = NAmanage.GetMouse(Players.LocalPlayer)
 		end
 	end)
 
@@ -74631,7 +75809,7 @@ NAgui.resizeable = function(ui, min, max)
 		if mouse then return mouse end
 		pcall(function()
 			if Players and Players.LocalPlayer then
-				mouse = Players.LocalPlayer:GetMouse()
+				mouse = NAmanage.GetMouse(Players.LocalPlayer)
 			end
 		end)
 		return mouse
@@ -80323,6 +81501,621 @@ if NAUIMANAGER.filterBox then
 	NAlib.connect("waypoint_filter_text", NAUIMANAGER.filterBox:GetPropertyChangedSignal("Text"):Connect(NAmanage.UpdateWaypointList))
 end
 
+NAStuff.ExecutorKeywordSet = NAStuff.ExecutorKeywordSet or {
+	["and"] = true, ["break"] = true, ["continue"] = true, ["do"] = true, ["else"] = true, ["elseif"] = true,
+	["end"] = true, ["false"] = true, ["for"] = true, ["function"] = true, ["if"] = true, ["in"] = true,
+	["local"] = true, ["nil"] = true, ["not"] = true, ["or"] = true, ["repeat"] = true, ["return"] = true,
+	["then"] = true, ["true"] = true, ["until"] = true, ["while"] = true, ["export"] = true, ["type"] = true,
+	["typeof"] = true, ["as"] = true,
+}
+NAStuff.ExecutorGlobalSet = NAStuff.ExecutorGlobalSet or {
+	["game"] = true, ["workspace"] = true, ["script"] = true, ["shared"] = true, ["plugin"] = true, ["Enum"] = true,
+	["Color3"] = true, ["Vector2"] = true, ["Vector3"] = true, ["CFrame"] = true, ["UDim"] = true, ["UDim2"] = true,
+	["Instance"] = true, ["TweenInfo"] = true, ["Ray"] = true, ["Rect"] = true, ["Region3"] = true, ["Random"] = true,
+	["DateTime"] = true, ["NumberRange"] = true, ["NumberSequence"] = true, ["ColorSequence"] = true,
+	["BrickColor"] = true, ["Axes"] = true, ["Faces"] = true, ["Font"] = true, ["math"] = true, ["string"] = true,
+	["table"] = true, ["task"] = true, ["debug"] = true, ["coroutine"] = true, ["os"] = true, ["utf8"] = true,
+	["vector"] = true,
+	["pairs"] = true, ["ipairs"] = true, ["next"] = true, ["print"] = true, ["warn"] = true, ["error"] = true,
+	["assert"] = true, ["pcall"] = true, ["xpcall"] = true, ["select"] = true, ["rawequal"] = true,
+	["rawget"] = true, ["rawset"] = true, ["rawlen"] = true, ["setmetatable"] = true, ["getmetatable"] = true,
+	["loadstring"] = true, ["load"] = true, ["require"] = true, ["tonumber"] = true, ["tostring"] = true,
+	["type"] = true, ["typeof"] = true, ["unpack"] = true, ["wait"] = true, ["delay"] = true, ["spawn"] = true,
+	["tick"] = true, ["time"] = true, ["elapsedTime"] = true, ["gcinfo"] = true, ["collectgarbage"] = true,
+	["getfenv"] = true, ["setfenv"] = true, ["newproxy"] = true, ["settings"] = true, ["UserSettings"] = true,
+}
+NAStuff.ExecutorTypeSet = NAStuff.ExecutorTypeSet or {
+	["any"] = true, ["boolean"] = true, ["buffer"] = true, ["nil"] = true, ["number"] = true,
+	["string"] = true, ["thread"] = true, ["unknown"] = true, ["never"] = true, ["userdata"] = true,
+}
+
+NAmanage.ExecutorSplitEditorLines = NAmanage.ExecutorSplitEditorLines or function(source)
+	source = tostring(source or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+	local out = {}
+	for line in (source.."\n"):gmatch("(.-)\n") do
+		out[#out + 1] = line
+	end
+	if #out == 0 then
+		out[1] = ""
+	end
+	return out
+end
+
+NAmanage.ExecutorJoinEditorLines = NAmanage.ExecutorJoinEditorLines or function(lines)
+	if type(lines) ~= "table" or #lines == 0 then
+		return ""
+	end
+	return table.concat(lines, "\n")
+end
+
+NAmanage.ExecutorRepairTabText = NAmanage.ExecutorRepairTabText or function(source)
+	source = tostring(source or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+	if source == "" then
+		return ""
+	end
+	local var = source:match("unpack%s*%(%s*([%a_][%w_]*)%s*%)")
+	if not var then
+		return source
+	end
+	if not (source:find(":FireServer%s*%(%s*unpack%s*%(") or source:find(":InvokeServer%s*%(%s*unpack%s*%(")) then
+		return source
+	end
+	local fixed = {}
+	local lastKeyLine
+	for line in (source.."\n"):gmatch("(.-)\n") do
+		local keyLine = line:match("^%s*%[%s*[%d\"'].-%]%s*=%s*.+$") and line:gsub("%s+", "") or nil
+		if not (keyLine and keyLine == lastKeyLine) then
+			fixed[#fixed + 1] = line
+		end
+		lastKeyLine = keyLine
+	end
+	source = table.concat(fixed, "\n")
+	if source:match("^%s*local%s+"..var.."%s*=%s*{") or source:match("^%s*"..var.."%s*=%s*{") then
+		return source
+	end
+	if source:match("^%s*%[%s*[%d\"'].-%]%s*=") then
+		return "local "..var.." = {\n"..source
+	end
+	return source
+end
+
+NAmanage.ExecutorSliceEditorLines = NAmanage.ExecutorSliceEditorLines or function(lines, firstLine, lastLine)
+	local out = {}
+	firstLine = math.max(1, tonumber(firstLine) or 1)
+	lastLine = math.max(firstLine, tonumber(lastLine) or firstLine)
+	for line = firstLine, lastLine do
+		out[#out + 1] = tostring(lines[line] or "")
+	end
+	if #out == 0 then
+		out[1] = ""
+	end
+	return table.concat(out, "\n")
+end
+
+NAmanage.ExecutorReplaceEditorLineRange = NAmanage.ExecutorReplaceEditorLineRange or function(lines, firstLine, lastLine, text)
+	lines = type(lines) == "table" and lines or { "" }
+	local insertLines = NAmanage.ExecutorSplitEditorLines(text)
+	local rebuilt = {}
+	firstLine = math.clamp(tonumber(firstLine) or 1, 1, math.max(#lines + 1, 1))
+	lastLine = math.clamp(tonumber(lastLine) or (firstLine - 1), firstLine - 1, math.max(#lines, firstLine - 1))
+	for line = 1, firstLine - 1 do
+		rebuilt[#rebuilt + 1] = tostring(lines[line] or "")
+	end
+	for _, lineText in ipairs(insertLines) do
+		rebuilt[#rebuilt + 1] = tostring(lineText or "")
+	end
+	for line = lastLine + 1, #lines do
+		rebuilt[#rebuilt + 1] = tostring(lines[line] or "")
+	end
+	if #rebuilt == 0 then
+		rebuilt[1] = ""
+	end
+	return rebuilt
+end
+
+NAmanage.ExecutorStripLuaLineForIndent = NAmanage.ExecutorStripLuaLineForIndent or function(line, state)
+	line = tostring(line or "")
+	state = state or {}
+	local out = {}
+	local i = 1
+	local len = #line
+	local function pushSpaces(count)
+		if count > 0 then
+			out[#out + 1] = string.rep(" ", count)
+		end
+	end
+	while i <= len do
+		if state.longClose then
+			local closeStart, closeEnd = line:find(state.longClose, i, true)
+			if closeStart then
+				pushSpaces(closeEnd - i + 1)
+				i = closeEnd + 1
+				state.longClose = nil
+			else
+				pushSpaces(len - i + 1)
+				break
+			end
+		else
+			local two = line:sub(i, i + 1)
+			if two == "--" then
+				local eq = line:match("^%-%-%[(=*)%[", i)
+				if eq then
+					local closePattern = "]"..eq.."]"
+					local closeStart = line:find(closePattern, i + 4 + #eq, true)
+					if closeStart then
+						pushSpaces(len - i + 1)
+					else
+						state.longClose = closePattern
+						pushSpaces(len - i + 1)
+					end
+				else
+					pushSpaces(len - i + 1)
+				end
+				break
+			elseif line:sub(i, i):match("[\"'`]") then
+				local quote = line:sub(i, i)
+				local j = i + 1
+				local escaped = false
+				while j <= len do
+					local ch = line:sub(j, j)
+					if escaped then
+						escaped = false
+					elseif ch == "\\" then
+						escaped = true
+					elseif ch == quote then
+						break
+					end
+					j += 1
+				end
+				if j > len then
+					j = len
+				end
+				pushSpaces(j - i + 1)
+				i = j + 1
+			else
+				local eq = line:match("^%[(=*)%[", i)
+				if eq then
+					local closePattern = "]"..eq.."]"
+					local closeStart, closeEnd = line:find(closePattern, i + 2 + #eq, true)
+					if closeStart then
+						pushSpaces(closeEnd - i + 1)
+						i = closeEnd + 1
+					else
+						state.longClose = closePattern
+						pushSpaces(len - i + 1)
+						break
+					end
+				else
+					out[#out + 1] = line:sub(i, i)
+					i += 1
+				end
+			end
+		end
+	end
+	return table.concat(out)
+end
+
+NAmanage.ExecutorSplitLuaStatementLine = NAmanage.ExecutorSplitLuaStatementLine or function(line, state)
+	line = tostring(line or "")
+	state = state or {}
+	local parts = {}
+	local startPos = 1
+	local i = 1
+	local len = #line
+	while i <= len do
+		if state.longClose then
+			local closeStart, closeEnd = line:find(state.longClose, i, true)
+			if closeStart then
+				i = closeEnd + 1
+				state.longClose = nil
+			else
+				break
+			end
+		else
+			local two = line:sub(i, i + 1)
+			if two == "--" then
+				local eq = line:match("^%-%-%[(=*)%[", i)
+				if eq then
+					local closePattern = "]"..eq.."]"
+					local closeStart, closeEnd = line:find(closePattern, i + 4 + #eq, true)
+					if closeStart then
+						i = closeEnd + 1
+					else
+						state.longClose = closePattern
+						break
+					end
+				else
+					break
+				end
+			elseif line:sub(i, i):match("[\"'`]") then
+				local quote = line:sub(i, i)
+				i += 1
+				local escaped = false
+				while i <= len do
+					local ch = line:sub(i, i)
+					if escaped then
+						escaped = false
+					elseif ch == "\\" then
+						escaped = true
+					elseif ch == quote then
+						break
+					end
+					i += 1
+				end
+				i += 1
+			else
+				local eq = line:match("^%[(=*)%[", i)
+				if eq then
+					local closePattern = "]"..eq.."]"
+					local closeStart, closeEnd = line:find(closePattern, i + 2 + #eq, true)
+					if closeStart then
+						i = closeEnd + 1
+					else
+						state.longClose = closePattern
+						break
+					end
+				elseif line:sub(i, i) == ";" then
+					parts[#parts + 1] = line:sub(startPos, i - 1)
+					startPos = i + 1
+					i += 1
+				else
+					i += 1
+				end
+			end
+		end
+	end
+	parts[#parts + 1] = line:sub(startPos)
+	return parts
+end
+
+NAmanage.ExecutorFormatLuaLineSpacing = NAmanage.ExecutorFormatLuaLineSpacing or function(line)
+	line = tostring(line or "")
+	local out = {}
+	local i = 1
+	local len = #line
+	local function currentText()
+		return table.concat(out)
+	end
+	local function trimRight()
+		if #out > 0 then
+			out[#out] = out[#out]:gsub("%s+$", "")
+			if out[#out] == "" then
+				table.remove(out, #out)
+			end
+		end
+	end
+	local function append(text)
+		out[#out + 1] = text
+	end
+	local function appendOperator(op)
+		trimRight()
+		append(" "..op.." ")
+		while i <= len and line:sub(i, i):match("%s") do
+			i += 1
+		end
+	end
+	local function previousSignificant()
+		local text = currentText():gsub("%s+$", "")
+		return text:sub(-1)
+	end
+	local function previousWord()
+		return currentText():match("([%a_][%w_]*)%s*$")
+	end
+	local function isUnaryMinus()
+		local prev = previousSignificant()
+		local word = previousWord()
+		return prev == "" or prev:match("[%(%[%{=,%+%-%*/%%%^#<>~]") or word == "return" or word == "local" or word == "then" or word == "do" or word == "else" or word == "elseif" or word == "and" or word == "or" or word == "not"
+	end
+	while i <= len do
+		local ch = line:sub(i, i)
+		local two = line:sub(i, i + 1)
+		local three = line:sub(i, i + 2)
+		if two == "--" then
+			append(line:sub(i))
+			break
+		elseif ch:match("[\"'`]") then
+			local quote = ch
+			local startQuote = i
+			i += 1
+			local escaped = false
+			while i <= len do
+				local cur = line:sub(i, i)
+				if escaped then
+					escaped = false
+				elseif cur == "\\" then
+					escaped = true
+				elseif cur == quote then
+					break
+				end
+				i += 1
+			end
+			if i > len then
+				i = len
+			end
+			append(line:sub(startQuote, i))
+			i += 1
+		else
+			local eq = line:match("^%[(=*)%[", i)
+			if eq then
+				local closePattern = "]"..eq.."]"
+				local closeStart, closeEnd = line:find(closePattern, i + 2 + #eq, true)
+				if closeStart then
+					append(line:sub(i, closeEnd))
+					i = closeEnd + 1
+				else
+					append(line:sub(i))
+					break
+				end
+			elseif three == "..." then
+				append("...")
+				i += 3
+			elseif three == "//=" or three == "..=" then
+				i += 3
+				appendOperator(three)
+			elseif two == "//" or two == "->" then
+				i += 2
+				appendOperator(two)
+			elseif two == ".." then
+				i += 2
+				appendOperator("..")
+			elseif two == "::" then
+				append("::")
+				i += 2
+			elseif two == "==" or two == "~=" or two == "<=" or two == ">=" or two == "+=" or two == "-=" or two == "*=" or two == "/=" or two == "%=" or two == "^=" then
+				i += 2
+				appendOperator(two)
+			elseif ch == "?" then
+				append("?")
+				i += 1
+			elseif ch == "=" or ch == "+" or ch == "*" or ch == "/" or ch == "%" or ch == "^" or ch == "<" or ch == ">" or ch == "|" or ch == "&" then
+				i += 1
+				appendOperator(ch)
+			elseif ch == "-" then
+				if isUnaryMinus() then
+					append("-")
+					i += 1
+					while i <= len and line:sub(i, i):match("%s") do
+						i += 1
+					end
+				else
+					i += 1
+					appendOperator("-")
+				end
+			elseif ch == "," then
+				trimRight()
+				append(", ")
+				i += 1
+				while i <= len and line:sub(i, i):match("%s") do
+					i += 1
+				end
+			else
+				append(ch)
+				i += 1
+			end
+		end
+	end
+	return table.concat(out):gsub("%s+$", "")
+end
+
+NAmanage.ExecutorLuaParenBalance = NAmanage.ExecutorLuaParenBalance or function(line)
+	line = tostring(line or "")
+	local balance = 0
+	local i = 1
+	local len = #line
+	while i <= len do
+		local ch = line:sub(i, i)
+		local two = line:sub(i, i + 1)
+		if two == "--" then
+			break
+		elseif ch:match("[\"'`]") then
+			local quote = ch
+			i += 1
+			local escaped = false
+			while i <= len do
+				local cur = line:sub(i, i)
+				if escaped then
+					escaped = false
+				elseif cur == "\\" then
+					escaped = true
+				elseif cur == quote then
+					break
+				end
+				i += 1
+			end
+		elseif ch == "(" then
+			balance += 1
+		elseif ch == ")" then
+			balance -= 1
+		end
+		i += 1
+	end
+	return balance
+end
+
+NAmanage.ExecutorCollapseLuaShortCalls = NAmanage.ExecutorCollapseLuaShortCalls or function(source)
+	local lines = {}
+	for line in (tostring(source or "").."\n"):gmatch("(.-)\n") do
+		lines[#lines + 1] = line
+	end
+	if #lines > 0 and lines[#lines] == "" and tostring(source or ""):sub(-1) ~= "\n" then
+		table.remove(lines)
+	end
+
+	local out = {}
+	local i = 1
+	local function hasCollapseBlockKeyword(text)
+		for _, word in ipairs({ "function", "then", "do", "end", "repeat", "until", "else", "elseif" }) do
+			if text:find("%f[%w_]"..word.."%f[^%w_]") then
+				return true
+			end
+		end
+		return false
+	end
+	while i <= #lines do
+		local line = lines[i]
+		local indent, content = line:match("^(%s*)(.-)%s*$")
+		if content and content:match("%(%s*$") then
+			local balance = NAmanage.ExecutorLuaParenBalance(content)
+			local pieces = { content }
+			local j = i + 1
+			local canCollapse = balance > 0
+			while canCollapse and j <= #lines and balance > 0 do
+				local nextContent = lines[j]:match("^%s*(.-)%s*$") or ""
+				if nextContent == "" or nextContent:find("%-%-", 1, true) or hasCollapseBlockKeyword(nextContent) then
+					canCollapse = false
+					break
+				end
+				pieces[#pieces + 1] = nextContent
+				balance += NAmanage.ExecutorLuaParenBalance(nextContent)
+				j += 1
+			end
+			if canCollapse and balance <= 0 and #pieces > 1 then
+				local joined = pieces[1]
+				for pieceIndex = 2, #pieces do
+					local piece = pieces[pieceIndex]
+					if piece:match("^%)") then
+						joined = joined:gsub("%s+$", "")..piece
+					else
+						joined = joined:gsub("%s+$", "")..(joined:match("%(%s*$") and "" or " ")..piece
+					end
+				end
+				joined = NAmanage.ExecutorFormatLuaLineSpacing(joined)
+				if #joined <= 160 then
+					out[#out + 1] = indent..joined
+					i = j
+				else
+					out[#out + 1] = line
+					i += 1
+				end
+			else
+				out[#out + 1] = line
+				i += 1
+			end
+		else
+			out[#out + 1] = line
+			i += 1
+		end
+	end
+	return table.concat(out, "\n")
+end
+
+NAmanage.ExecutorFormatLuaSource = NAmanage.ExecutorFormatLuaSource or function(source)
+	source = tostring(source or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+	local lines = {}
+	local splitState = {}
+	for line in (source.."\n"):gmatch("(.-)\n") do
+		for _, part in ipairs(NAmanage.ExecutorSplitLuaStatementLine(line, splitState)) do
+			lines[#lines + 1] = part
+		end
+	end
+	if #lines > 0 and lines[#lines] == "" and source:sub(-1) ~= "\n" then
+		table.remove(lines)
+	end
+
+	local formatted = {}
+	local indent = 0
+	local state = {}
+	local indentText = "\t"
+
+	for _, rawLine in ipairs(lines) do
+		local line = tostring(rawLine or ""):gsub("%s+$", "")
+		local trimmed = line:gsub("^%s+", "")
+		local code = NAmanage.ExecutorStripLuaLineForIndent(trimmed, state)
+		local spaced = NAmanage.ExecutorFormatLuaLineSpacing(trimmed)
+		local compact = code:gsub("^%s+", "")
+		local closeOutdent = 0
+		local branchOutdent = 0
+		if compact ~= "" then
+			if compact:match("^end%f[^%w_]") or compact:match("^until%f[^%w_]") or compact:sub(1, 1) == "}" then
+				closeOutdent += 1
+			end
+			if compact:match("^else%f[^%w_]") or compact:match("^elseif%f[^%w_]") then
+				branchOutdent += 1
+			end
+		end
+		indent = math.max(indent - closeOutdent - branchOutdent, 0)
+		if trimmed == "" then
+			formatted[#formatted + 1] = ""
+		else
+			formatted[#formatted + 1] = string.rep(indentText, indent)..spaced
+		end
+
+		local opens = 0
+		local closes = 0
+		for token in code:gmatch("%f[%w_](%w+)%f[^%w_]") do
+			if token == "function" or token == "then" or token == "do" or token == "repeat" then
+				opens += 1
+			elseif token == "end" or token == "until" then
+				closes += 1
+			end
+		end
+		for _ in code:gmatch("{") do opens += 1 end
+		for _ in code:gmatch("}") do closes += 1 end
+		if compact:match("^else%f[^%w_]") then
+			opens += 1
+		end
+		indent = math.max(indent + opens - math.max(closes - closeOutdent, 0), 0)
+	end
+
+	return NAmanage.ExecutorCollapseLuaShortCalls(table.concat(formatted, "\n")):gsub("%s+$", "")
+end
+
+NAmanage.ExecutorMergeEditorChunks = NAmanage.ExecutorMergeEditorChunks or function(chunks)
+	if type(chunks) ~= "table" or #chunks == 0 then
+		return ""
+	end
+	return table.concat(chunks, "")
+end
+
+NAmanage.ExecutorNormalizeTab = NAmanage.ExecutorNormalizeTab or function(tab)
+	if not tab then
+		return nil
+	end
+	if type(tab.text) ~= "string" then
+		if type(tab.chunks) == "table" and #tab.chunks > 0 then
+			tab.text = NAmanage.ExecutorMergeEditorChunks(tab.chunks)
+		else
+			tab.text = ""
+		end
+	end
+	if type(tab.lines) ~= "table" or #tab.lines == 0 then
+		tab.lines = NAmanage.ExecutorSplitEditorLines(tab.text)
+	end
+	tab.viewLine = math.clamp(tonumber(tab.viewLine or tab.page) or 1, 1, math.max(#tab.lines, 1))
+	tab.page = 1
+	tab.chunks = { tab.text }
+	return tab
+end
+
+NAmanage.ExecutorGetTabText = NAmanage.ExecutorGetTabText or function(tab)
+	tab = NAmanage.ExecutorNormalizeTab(tab)
+	if not tab then
+		return ""
+	end
+	if tab.textDirty == true or type(tab.text) ~= "string" then
+		tab.text = NAmanage.ExecutorJoinEditorLines(tab.lines)
+		tab.chunks = { tab.text }
+		tab.textDirty = false
+	end
+	return tostring(tab.text or "")
+end
+
+NAmanage.ExecutorPlaceSettingsPanel = NAmanage.ExecutorPlaceSettingsPanel or function(settingsPanel)
+	settingsPanel.AnchorPoint = Vector2.new(1, 0)
+	settingsPanel.Position = UDim2.new(1, -10, 0, 42)
+end
+
+NAmanage.ExecutorBindSetting = NAmanage.ExecutorBindSetting or function(toggle, hit, cfg, key, applySettings)
+	local function flip()
+		cfg[key] = not cfg[key]
+		applySettings()
+	end
+	toggle.MouseButton1Click:Connect(flip)
+	if hit then
+		hit.MouseButton1Click:Connect(flip)
+	end
+end
+
 NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	if not (NAUIMANAGER and NAUIMANAGER.ExecutorFrame and NAUIMANAGER.ExecutorContainer) then
 		return false
@@ -80356,9 +82149,9 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	local tabsFile = execDir.."/tabs.json"
 	local indexFile = execDir.."/scripts.json"
 	local scriptsDir = execDir.."/Scripts"
-	local fsOk = type(isfolder) == "function"
+	local folderApiOk = type(isfolder) == "function"
 		and type(makefolder) == "function"
-		and type(isfile) == "function"
+	local fsOk = type(isfile) == "function"
 		and type(readfile) == "function"
 		and type(writefile) == "function"
 	local delOk = type(delfile) == "function"
@@ -80386,27 +82179,15 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		string = Color3.fromRGB(166, 226, 128),
 		comment = Color3.fromRGB(112, 122, 132),
 		number = Color3.fromRGB(255, 214, 112),
+		func = Color3.fromRGB(130, 230, 210),
+		method = Color3.fromRGB(118, 194, 255),
+		property = Color3.fromRGB(205, 194, 255),
+		operator = Color3.fromRGB(255, 155, 190),
+		bracket = Color3.fromRGB(210, 210, 225),
 		success = Color3.fromRGB(156, 235, 174),
 		warn = Color3.fromRGB(255, 214, 112),
 		error = Color3.fromRGB(255, 146, 146),
 	}
-	local keywordSet = {
-		["and"] = true, ["break"] = true, ["continue"] = true, ["do"] = true, ["else"] = true, ["elseif"] = true,
-		["end"] = true, ["false"] = true, ["for"] = true, ["function"] = true, ["if"] = true, ["in"] = true,
-		["local"] = true, ["nil"] = true, ["not"] = true, ["or"] = true, ["repeat"] = true, ["return"] = true,
-		["then"] = true, ["true"] = true, ["until"] = true, ["while"] = true, ["export"] = true, ["type"] = true,
-		["typeof"] = true,
-	}
-	local globalSet = {
-		["game"] = true, ["workspace"] = true, ["script"] = true, ["shared"] = true, ["plugin"] = true, ["Enum"] = true,
-		["Color3"] = true, ["Vector2"] = true, ["Vector3"] = true, ["CFrame"] = true, ["UDim2"] = true,
-		["Instance"] = true, ["math"] = true, ["string"] = true, ["table"] = true, ["task"] = true, ["debug"] = true,
-		["pairs"] = true, ["ipairs"] = true, ["next"] = true, ["print"] = true, ["warn"] = true, ["error"] = true,
-		["pcall"] = true, ["xpcall"] = true, ["select"] = true, ["rawget"] = true, ["rawset"] = true,
-		["setmetatable"] = true, ["getmetatable"] = true, ["loadstring"] = true, ["require"] = true,
-		["coroutine"] = true, ["os"] = true, ["utf8"] = true,
-	}
-
 	local function makeCornerAndStroke(obj, radius, thickness)
 		local corner = InstanceNew("UICorner")
 		corner.CornerRadius = UDim.new(0, radius or 8)
@@ -80555,6 +82336,9 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		if not fsOk then
 			return false
 		end
+		if not folderApiOk then
+			return true
+		end
 		local ok = true
 		local function mk(path)
 			if not ok then
@@ -80671,23 +82455,43 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		local maxW = math.max(1, vp.X - padX * 2)
 		local maxH = math.max(1, vp.Y - padY * 2)
 		local mobile = isTouchCompact(vp)
-		local targetW
-		local targetH
-		if mobile then
-			targetW = clampSize(math.floor(vp.X * 0.965), 340, maxW)
-			targetH = clampSize(math.floor(vp.Y * (vp.Y < 520 and 0.88 or 0.90)), 280, maxH)
-		else
-			targetW = clampSize(920, 680, maxW)
-			targetH = clampSize(540, 420, maxH)
+		local defaultW = mobile and math.floor(vp.X * 0.965) or 920
+		local defaultH = mobile and math.floor(vp.Y * (vp.Y < 520 and 0.88 or 0.90)) or 540
+		local initialized = frame.GetAttribute and NAmanage.GetAttr(frame, "NAExecutorDefaultSized") == true
+		local curW = tonumber(frame.Size.X.Offset) or 0
+		local curH = tonumber(frame.Size.Y.Offset) or 0
+		local targetW = initialized and curW or defaultW
+		local targetH = initialized and curH or defaultH
+		if targetW <= 0 then
+			targetW = defaultW
 		end
+		if targetH <= 0 then
+			targetH = defaultH
+		end
+		targetW = math.clamp(math.floor(targetW + 0.5), 1, maxW)
+		targetH = math.clamp(math.floor(targetH + 0.5), 1, maxH)
 		execResponsive.compact = targetW < 760 or targetH < 430
 		execResponsive.phone = targetW < 560
 		execResponsive.lastW = targetW
 		execResponsive.lastH = targetH
 		frame.AnchorPoint = Vector2.new(0, 0)
-		frame.Size = UDim2.fromOffset(targetW, targetH)
-		NAmanage.centerFrame(frame)
+		if frame.AbsoluteSize.X ~= targetW or frame.AbsoluteSize.Y ~= targetH then
+			frame.Size = UDim2.fromOffset(targetW, targetH)
+		end
+		if frame.SetAttribute then
+			NAmanage.SetAttr(frame, "NAExecutorDefaultSized", true)
+		end
+		if not initialized then
+			NAmanage.centerFrame(frame)
+		else
+			local x = math.floor(frame.Position.X.Scale * vp.X + frame.Position.X.Offset + 0.5)
+			local y = math.floor(frame.Position.Y.Scale * vp.Y + frame.Position.Y.Offset + 0.5)
+			x = math.clamp(x, padX, math.max(padX, vp.X - targetW - padX))
+			y = math.clamp(y, padY, math.max(padY, vp.Y - targetH - padY))
+			frame.Position = UDim2.fromOffset(x, y)
+		end
 	end
+	NAmanage.Executor_ApplyResponsive = applyExecutorFrameSize
 	local rootPad = InstanceNew("UIPadding")
 	rootPad.PaddingBottom = UDim.new(0, 10)
 	rootPad.PaddingLeft = UDim.new(0, 10)
@@ -80829,11 +82633,174 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	editorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 	editorScroll.Position = UDim2.new(0, 50, 0, 0)
 	editorScroll.ScrollBarImageColor3 = colors.subtle
-	editorScroll.ScrollBarThickness = 6
+	editorScroll.ScrollBarThickness = 0
 	editorScroll.ScrollingDirection = Enum.ScrollingDirection.XY
 	editorScroll.Size = UDim2.new(1, -50, 1, 0)
 	editorScroll.Parent = editorPane
 	makeCornerAndStroke(editorScroll, 8, 1)
+
+	local editorLineScroll = InstanceNew("ScrollingFrame")
+	editorLineScroll.Name = "LineScrollProxy"
+	editorLineScroll.Active = false
+	editorLineScroll.BackgroundTransparency = 1
+	editorLineScroll.BorderSizePixel = 0
+	editorLineScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	editorLineScroll.Position = editorScroll.Position
+	editorLineScroll.ScrollBarThickness = 0
+	editorLineScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+	editorLineScroll.Size = editorScroll.Size
+	editorLineScroll.Visible = false
+	editorLineScroll.Parent = editorPane
+
+	local function makeEditorScrollBar(parent, name, axis)
+		local horizontal = axis == "X"
+		local bar = InstanceNew("Frame")
+		bar.Name = name
+		bar.BackgroundColor3 = colors.panel2
+		bar.BorderSizePixel = 0
+		bar.Visible = false
+		bar.ZIndex = 35
+		bar.Parent = parent
+		makeCornerAndStroke(bar, 7, 1)
+
+		local upButton = InstanceNew("TextButton")
+		upButton.Name = horizontal and "Left" or "Up"
+		upButton.AutoButtonColor = false
+		upButton.BackgroundColor3 = colors.panel3
+		upButton.BorderSizePixel = 0
+		upButton.Font = Enum.Font.GothamBold
+		upButton.Text = horizontal and "<" or "^"
+		upButton.TextColor3 = colors.text
+		upButton.TextSize = 10
+		upButton.ZIndex = 36
+		upButton.Parent = bar
+		makeCornerAndStroke(upButton, 5, 1)
+
+		local downButton = InstanceNew("TextButton")
+		downButton.Name = horizontal and "Right" or "Down"
+		downButton.AutoButtonColor = false
+		downButton.BackgroundColor3 = colors.panel3
+		downButton.BorderSizePixel = 0
+		downButton.Font = Enum.Font.GothamBold
+		downButton.Text = horizontal and ">" or "v"
+		downButton.TextColor3 = colors.text
+		downButton.TextSize = 10
+		downButton.ZIndex = 36
+		downButton.Parent = bar
+		makeCornerAndStroke(downButton, 5, 1)
+
+		local track = InstanceNew("Frame")
+		track.Name = "Track"
+		track.BackgroundColor3 = colors.panel
+		track.BorderSizePixel = 0
+		track.ZIndex = 36
+		track.Parent = bar
+		makeCornerAndStroke(track, 5, 1)
+
+		local thumb = InstanceNew("Frame")
+		thumb.Name = "Thumb"
+		thumb.BackgroundColor3 = colors.subtle
+		thumb.BorderSizePixel = 0
+		thumb.ZIndex = 37
+		thumb.Parent = track
+		makeCornerAndStroke(thumb, 5, 1)
+
+		if horizontal then
+			bar.Size = UDim2.new(0, 120, 0, 16)
+			upButton.Position = UDim2.new(0, 0, 0, 0)
+			upButton.Size = UDim2.new(0, 16, 1, 0)
+			downButton.AnchorPoint = Vector2.new(1, 0)
+			downButton.Position = UDim2.new(1, 0, 0, 0)
+			downButton.Size = UDim2.new(0, 16, 1, 0)
+			track.Position = UDim2.new(0, 18, 0, 0)
+			track.Size = UDim2.new(1, -36, 1, 0)
+		else
+			bar.Size = UDim2.new(0, 16, 0, 120)
+			upButton.Position = UDim2.new(0, 0, 0, 0)
+			upButton.Size = UDim2.new(1, 0, 0, 16)
+			downButton.AnchorPoint = Vector2.new(0, 1)
+			downButton.Position = UDim2.new(0, 0, 1, 0)
+			downButton.Size = UDim2.new(1, 0, 0, 16)
+			track.Position = UDim2.new(0, 0, 0, 18)
+			track.Size = UDim2.new(1, 0, 1, -36)
+		end
+
+		return {
+			bar = bar,
+			upButton = upButton,
+			downButton = downButton,
+			track = track,
+			thumb = thumb,
+		}
+	end
+
+	local editorVScroll = makeEditorScrollBar(editorPane, "CustomScrollBar", "Y")
+	local editorHScroll = makeEditorScrollBar(editorPane, "CustomHorizontalScrollBar", "X")
+	local editorGetVisibleLines
+	local editorGetTotalLines
+	local editorGetViewLine
+	local editorSetViewLine
+
+	local function layoutEditorScrollBar(_, target, widgets)
+		local bar = widgets and widgets.bar
+		if not (target and bar and bar.Parent) then
+			return
+		end
+		local parentPos = bar.Parent.AbsolutePosition
+		local relX = math.floor(target.AbsolutePosition.X - parentPos.X + 0.5)
+		local relY = math.floor(target.AbsolutePosition.Y - parentPos.Y + 0.5)
+		local w = math.floor(target.AbsoluteSize.X + 0.5)
+		local h = math.floor(target.AbsoluteSize.Y + 0.5)
+		if bar == editorHScroll.bar then
+			bar.Position = UDim2.new(0, relX, 0, relY + h - 16)
+			bar.Size = UDim2.new(0, math.max(48, w - 18), 0, 16)
+		else
+			bar.Position = UDim2.new(0, relX + w - 16, 0, relY)
+			bar.Size = UDim2.new(0, 16, 0, math.max(48, h - 18))
+		end
+	end
+
+	local executorVerticalScroll = NAmanage.CustomScroll and NAmanage.CustomScroll.create and NAmanage.CustomScroll.create("executor_editor_v", {
+		getWidgets = function()
+			return editorVScroll
+		end,
+		getTarget = function()
+			return editorScroll
+		end,
+		getVisibleSpace = function()
+			return editorGetVisibleLines and editorGetVisibleLines() or 1
+		end,
+		getTotalSpace = function()
+			return editorGetTotalLines and editorGetTotalLines() or 1
+		end,
+		getPosition = function()
+			return math.max(0, (editorGetViewLine and editorGetViewLine() or 1) - 1)
+		end,
+		setPosition = function(_, _, pos)
+			if editorSetViewLine then
+				editorSetViewLine(math.floor((tonumber(pos) or 0) + 1.5))
+			end
+		end,
+		layoutForTarget = layoutEditorScrollBar,
+		step = 3,
+	})
+	local executorHorizontalScroll = NAmanage.CustomScroll and NAmanage.CustomScroll.create and NAmanage.CustomScroll.create("executor_editor_h", {
+		axis = "X",
+		getWidgets = function()
+			return editorHScroll
+		end,
+		getTarget = function()
+			return editorScroll
+		end,
+		layoutForTarget = layoutEditorScrollBar,
+		step = 96,
+	})
+	if executorVerticalScroll and executorVerticalScroll.install then
+		executorVerticalScroll.install()
+	end
+	if executorHorizontalScroll and executorHorizontalScroll.install then
+		executorHorizontalScroll.install()
+	end
 
 	local textBox = InstanceNew("TextBox")
 	textBox.Name = "Source"
@@ -80878,6 +82845,11 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	local stringLayer = makeLayer("Strings", colors.string, 4)
 	local commentLayer = makeLayer("Comments", colors.comment, 4)
 	local numberLayer = makeLayer("Numbers", colors.number, 4)
+	local functionLayer = makeLayer("Functions", colors.func, 4)
+	local methodLayer = makeLayer("Methods", colors.method, 4)
+	local propertyLayer = makeLayer("Properties", colors.property, 4)
+	local operatorLayer = makeLayer("Operators", colors.operator, 4)
+	local bracketLayer = makeLayer("Brackets", colors.bracket, 4)
 	textBox.ZIndex = 3
 
 	local pagePanel = InstanceNew("Frame")
@@ -80914,7 +82886,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	pageLabel.Font = Enum.Font.GothamSemibold
 	pageLabel.LayoutOrder = 2
 	pageLabel.Size = UDim2.new(1, -74, 0, 22)
-	pageLabel.Text = "Page 1/1"
+	pageLabel.Text = "Lines 1-1/1"
 	pageLabel.TextColor3 = colors.subtle
 	pageLabel.TextSize = 12
 	pageLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -81030,14 +83002,21 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 
 	local actionLayout = InstanceNew("UIGridLayout")
 	actionLayout.CellPadding = UDim2.new(0, 6, 0, 0)
-	actionLayout.CellSize = UDim2.new(0.1666, -5, 1, 0)
-	actionLayout.FillDirectionMaxCells = 6
+	local hasClipboardPaste = type(getclipboard) == "function"
+	local actionButtonCount = hasClipboardPaste and 8 or 7
+	actionLayout.CellSize = UDim2.new(1 / actionButtonCount, -6, 1, 0)
+	actionLayout.FillDirectionMaxCells = actionButtonCount
 	actionLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	actionLayout.Parent = actions
 
 	local executeButton = makeButton(actions, "Execute", colors.tabActive)
 	local clearButton = makeButton(actions, "Clear", colors.panel3)
 	local copyButton = makeButton(actions, "Copy", colors.panel3)
+	local pasteButton = hasClipboardPaste and makeButton(actions, "Paste from Clipboard", colors.panel3) or nil
+	if pasteButton then
+		pasteButton.TextSize = 10
+	end
+	local formatButton = makeButton(actions, "Format", colors.panel3)
 	local renameButton = makeButton(actions, "Rename Tab", colors.panel3)
 	local duplicateButton = makeButton(actions, "Duplicate Tab", colors.panel3)
 	local deleteTabButton = makeButton(actions, "Delete Tab", colors.panel3)
@@ -81198,89 +83177,17 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	local tabSaveScheduled = false
 	local lastTabClickIndex = 0
 	local lastTabClickTime = 0
-	local chunkLimit = 12000
+	local editorLineBuffer = 24
+	local editorVirtualStart = 1
+	local editorVirtualEnd = 1
+	local editorVirtualLineHeight = 19
 	local editorLoading = false
 	local editorLoaded = false
-
-	local function splitEditorText(source)
-		source = tostring(source or "")
-		if source == "" then
-			return { "" }
-		end
-		local out = {}
-		local pos = 1
-		while pos <= #source do
-			local endPos = math.min(pos + chunkLimit - 1, #source)
-			if endPos < #source then
-				local seg = source:sub(pos, endPos)
-				local cut
-				local from = 1
-				while true do
-					local found = seg:find("\n", from, true)
-					if not found then
-						break
-					end
-					cut = found
-					from = found + 1
-				end
-				if cut and cut > math.floor(chunkLimit * 0.35) then
-					endPos = pos + cut - 1
-				end
-			end
-			out[#out + 1] = source:sub(pos, endPos)
-			pos = endPos + 1
-		end
-		if #out == 0 then
-			out[1] = ""
-		end
-		return out
-	end
-
-	local function mergeEditorChunks(chunks)
-		if type(chunks) ~= "table" or #chunks == 0 then
-			return ""
-		end
-		return table.concat(chunks, "")
-	end
-
-	local function compactEditorPages(chunks, preferPage)
-		if type(chunks) ~= "table" then
-			chunks = { "" }
-		end
-		preferPage = tonumber(preferPage) or 1
-		for i = #chunks, 1, -1 do
-			if #chunks > 1 and tostring(chunks[i] or "") == "" then
-				table.remove(chunks, i)
-				if preferPage > i then
-					preferPage -= 1
-				elseif preferPage == i then
-					preferPage = math.min(i, #chunks)
-				end
-			end
-		end
-		if #chunks == 0 then
-			chunks[1] = ""
-			preferPage = 1
-		end
-		return math.clamp(preferPage, 1, math.max(#chunks, 1))
-	end
-
-	local function normalizeEditorTab(tab)
-		if not tab then
-			return nil
-		end
-		if type(tab.chunks) ~= "table" or #tab.chunks == 0 then
-			tab.chunks = splitEditorText(tab.text or "")
-		end
-		tab.page = math.clamp(tonumber(tab.page) or 1, 1, math.max(#tab.chunks, 1))
-		tab.text = mergeEditorChunks(tab.chunks)
-		return tab
-	end
-
-	local function getEditorTabText(tab)
-		tab = normalizeEditorTab(tab)
-		return tab and (tab.text or mergeEditorChunks(tab.chunks)) or ""
-	end
+	local editorTextLock = 0
+	local editorRenderedText = ""
+	local editorRenderedStart = 1
+	local editorRenderedEnd = 1
+	local commitCurrentPage
 
 	local function showPrompt(title, initialText, callback)
 		promptTitle.Text = title or "Name"
@@ -81326,25 +83233,71 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 
 	local function saveTabsNow()
 		if not fsOk then
-			return
+			setStatus("Executor tabs cannot save: filesystem unavailable", colors.error)
+			return false
+		end
+		if not ensureExecutorFolders() then
+			setStatus("Executor tabs cannot save: folder create failed", colors.error)
+			return false
+		end
+		if editorLoaded and type(commitCurrentPage) == "function" then
+			commitCurrentPage(true)
 		end
 		local payload = { cur = currentTab, tabs = {} }
 		for i, tab in ipairs(tabs) do
+			NAmanage.ExecutorNormalizeTab(tab)
+			local tabText = NAmanage.ExecutorRepairTabText(NAmanage.ExecutorGetTabText(tab))
+			if tabText ~= tab.text then
+				tab.text = tabText
+				tab.lines = NAmanage.ExecutorSplitEditorLines(tabText)
+				tab.chunks = { tabText }
+				tab.textDirty = false
+			end
 			payload.tabs[i] = {
 				title = tab.title or ("Tab "..i),
-				text = tab.text or "",
+				text = tabText,
 			}
 		end
 		local ok, encoded = pcall(function()
 			return HttpService:JSONEncode(payload)
 		end)
-		if ok and encoded then
-			pcall(writefile, tabsFile, encoded)
+		if not (ok and encoded) then
+			setStatus("Executor tabs cannot save: encode failed", colors.error)
+			return false
 		end
+		local function tryWrite(fn)
+			if type(fn) ~= "function" then
+				return false, "writefile missing"
+			end
+			local wrote, err = pcall(fn, tabsFile, encoded)
+			if not wrote then
+				return false, err or "writefile failed"
+			end
+			if type(readfile) == "function" then
+				local okRead, saved = pcall(readfile, tabsFile)
+				if okRead and saved == encoded then
+					return true
+				end
+				return false, "write verification failed"
+			end
+			return true
+		end
+
+		local wrote, err = tryWrite(writefile)
+		if not wrote and NAStuff and type(NAStuff._wf) == "function" and NAStuff._wf ~= writefile then
+			wrote, err = tryWrite(NAStuff._wf)
+		end
+		if not wrote then
+			setStatus("Executor tabs cannot save: "..tostring(err or "writefile failed"), colors.error)
+			return false
+		end
+		setStatus("Executor tabs saved", colors.success)
+		return true
 	end
 
 	local function scheduleTabsSave()
 		if not fsOk then
+			setStatus("Executor tabs cannot save: filesystem unavailable", colors.error)
 			return
 		end
 		tabSaveDirty = true
@@ -81355,59 +83308,86 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		task.delay(0.8, function()
 			if tabSaveDirty then
 				tabSaveDirty = false
-				saveTabsNow()
+				if not saveTabsNow() then
+					tabSaveDirty = true
+				end
 			end
 			tabSaveScheduled = false
+			if tabSaveDirty then
+				scheduleTabsSave()
+			end
 		end)
 	end
 
+	local function getEditorLineHeight()
+		local fallback = tonumber(textBox.TextSize) or 15
+		local ok, measured = pcall(function()
+			return TextServiceRef:GetTextSize("M", textBox.TextSize, textBox.Font, Vector2.new(1000, 1000)).Y
+		end)
+		return math.max(1, math.ceil((ok and type(measured) == "number" and measured or fallback)))
+	end
+
 	local function updatePageInfo()
-		local tab = normalizeEditorTab(tabs[currentTab])
-		local total = tab and math.max(#tab.chunks, 1) or 1
-		local page = tab and (tab.page or 1) or 1
-		pageLabel.Text = "Page "..tostring(page).."/"..tostring(total)
-		pagePrev.Visible = total > 1
-		pageNext.Visible = total > 1
-		pagePanel.Visible = total > 1
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+		local total = tab and math.max(#tab.lines, 1) or 1
+		local lineHeight = getEditorLineHeight()
+		local viewHeight = math.max(1, (editorScroll.AbsoluteSize.Y or 0) - 22)
+		local visibleCount = math.max(1, math.floor(viewHeight / math.max(lineHeight, 1)))
+		local firstLine = math.clamp(math.floor(math.max(editorLineScroll.CanvasPosition.Y, 0) / math.max(lineHeight, 1)) + 1, 1, total)
+		local lastLine = math.clamp(firstLine + visibleCount - 1, firstLine, total)
+		pageLabel.Text = "Lines "..tostring(firstLine).."-"..tostring(lastLine).."/"..tostring(total)
+		pagePrev.Visible = false
+		pageNext.Visible = false
+		pagePanel.Visible = total > math.max(1, lastLine - firstLine + 1)
+	end
+
+	local function beginEditorTextSet()
+		editorTextLock += 1
+		editorLoading = true
+	end
+
+	local function finishEditorTextSet()
+		editorLoading = false
+		task.defer(function()
+			editorTextLock = math.max(editorTextLock - 1, 0)
+		end)
 	end
 
 	local function setEditorBoxText(text)
-		editorLoading = true
+		beginEditorTextSet()
 		textBox.Text = tostring(text or "")
-		editorLoading = false
+		finishEditorTextSet()
 	end
 
-	local function commitCurrentPage(skipSave)
+	commitCurrentPage = function(skipSave)
 		if editorLoading then
 			return
 		end
-		local tab = normalizeEditorTab(tabs[currentTab])
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
 		if not tab then
 			return
 		end
-		local oldTotal = math.max(#tab.chunks, 1)
-		local page = math.clamp(tonumber(tab.page) or 1, 1, oldTotal)
-		local text = tostring(textBox.Text or "")
-		local reloadPage = false
-		if #text > chunkLimit then
-			local parts = splitEditorText(text)
-			table.remove(tab.chunks, page)
-			for i = #parts, 1, -1 do
-				table.insert(tab.chunks, page, parts[i])
-			end
-			tab.page = math.clamp(page, 1, math.max(#tab.chunks, 1))
-			reloadPage = true
-			setStatus("Text split into pages to avoid Roblox TextBox limits", colors.warn)
-		else
-			tab.chunks[page] = text
-			tab.page = compactEditorPages(tab.chunks, page)
-			reloadPage = oldTotal ~= #tab.chunks or tab.page ~= page
+		local visibleText = tostring(textBox.Text or "")
+		local lineHeight = getEditorLineHeight()
+		local function syncViewOnly()
+			tab.viewLine = math.clamp(math.floor(math.max(editorLineScroll.CanvasPosition.Y, 0) / lineHeight) + 1, 1, math.max(#tab.lines, 1))
+			updatePageInfo()
 		end
-		tab.text = mergeEditorChunks(tab.chunks)
-		if reloadPage then
-			setEditorBoxText(tab.chunks[tab.page] or "")
+		if visibleText == tostring(editorRenderedText or "") then
+			syncViewOnly()
+			return
 		end
-		updatePageInfo()
+		local total = math.max(#tab.lines, 1)
+		local firstLine = math.clamp(tonumber(editorRenderedStart) or editorVirtualStart or 1, 1, total)
+		local lastLine = math.clamp(tonumber(editorRenderedEnd) or editorVirtualEnd or firstLine, firstLine, total)
+		tab.lines = NAmanage.ExecutorReplaceEditorLineRange(tab.lines, firstLine, lastLine, visibleText)
+		editorVirtualStart = firstLine
+		editorVirtualEnd = firstLine + #(NAmanage.ExecutorSplitEditorLines(visibleText)) - 1
+		editorRenderedStart = editorVirtualStart
+		editorRenderedEnd = editorVirtualEnd
+		editorRenderedText = visibleText
+		tab.textDirty = true
+		syncViewOnly()
 		if not skipSave then
 			scheduleTabsSave()
 		end
@@ -81418,13 +83398,15 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 			return
 		end
 		tab.text = tostring(source or "")
-		tab.chunks = splitEditorText(tab.text)
+		tab.lines = NAmanage.ExecutorSplitEditorLines(tab.text)
+		tab.chunks = { tab.text }
+		tab.textDirty = false
 		tab.page = 1
-		tab.text = mergeEditorChunks(tab.chunks)
+		tab.viewLine = 1
 	end
 
 	local function measureSource(source)
-		local lineHeight = textBox.TextSize + 4
+		local lineHeight = getEditorLineHeight()
 		local longest = 0
 		local lines = 0
 		for line in ((source or "").."\n"):gmatch("(.-)\n") do
@@ -81437,9 +83419,36 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		if lines <= 0 then
 			lines = 1
 		end
-		local desiredWidth = math.max(editorScroll.AbsoluteSize.X - 20, longest + 26)
-		local desiredHeight = math.max(editorScroll.AbsoluteSize.Y - 4, lines * lineHeight + 12)
+		local viewportWidth = math.max(1, (editorScroll.AbsoluteSize.X or 0) - 18)
+		local desiredWidth = math.max(viewportWidth, longest + 12)
+		local desiredHeight = math.max(math.max(editorScroll.AbsoluteSize.Y - 22, 1), lines * lineHeight + 12)
 		return desiredWidth, desiredHeight, lines, lineHeight
+	end
+
+	local function getEditorViewportHeight()
+		return math.max(1, (editorScroll.AbsoluteSize.Y or 0) - 22)
+	end
+
+	local function getEditorWindowMetrics()
+		local lineHeight = getEditorLineHeight()
+		local visible = math.max(1, math.floor(getEditorViewportHeight() / math.max(lineHeight, 1)))
+		return lineHeight, visible
+	end
+
+	local function getEditorVisibleLine(totalLines)
+		local lineHeight = getEditorWindowMetrics()
+		local total = math.max(tonumber(totalLines) or 1, 1)
+		return math.clamp(math.floor(math.max(editorLineScroll.CanvasPosition.Y, 0) / math.max(lineHeight, 1)) + 1, 1, total)
+	end
+
+	local function getEditorWindowRange(totalLines, firstVisibleLine)
+		local _, visibleLines = getEditorWindowMetrics()
+		local total = math.max(tonumber(totalLines) or 1, 1)
+		local firstVisible = math.clamp(tonumber(firstVisibleLine) or getEditorVisibleLine(total), 1, total)
+		local lastVisible = math.clamp(firstVisible + visibleLines - 1, firstVisible, total)
+		local firstRender = firstVisible
+		local lastRender = lastVisible
+		return firstRender, lastRender, firstVisible, lastVisible
 	end
 
 	local function buildHighlightLayers(source)
@@ -81450,6 +83459,11 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 			strings = {},
 			comments = {},
 			numbers = {},
+			functions = {},
+			methods = {},
+			properties = {},
+			operators = {},
+			brackets = {},
 		}
 		local function blankFor(ch)
 			if ch == "\n" or ch == "\r" or ch == "\t" then
@@ -81476,13 +83490,35 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		end
 		local i = 1
 		local n = #source
+		local function findLongBracket(pos)
+			local eq = source:match("^%[(=*)%[", pos)
+			if not eq then
+				return nil
+			end
+			local closePattern = "]"..eq.."]"
+			local closeStart, closeEnd = source:find(closePattern, pos + 2 + #eq, true)
+			return closeStart, closeEnd, closePattern
+		end
+		local function nextNonSpace(pos)
+			local j = pos
+			while j <= n and source:sub(j, j):match("%s") do
+				j += 1
+			end
+			return source:sub(j, j), j
+		end
+		local function prevNonSpace(pos)
+			local j = pos
+			while j >= 1 and source:sub(j, j):match("%s") do
+				j -= 1
+			end
+			return source:sub(j, j), j
+		end
 		while i <= n do
 			local ch = source:sub(i, i)
 			local nextTwo = source:sub(i, i + 1)
-			local nextFour = source:sub(i, i + 3)
-			if nextFour == "--[[" then
-				local closeIndex = source:find("%]%]", i + 4, false)
-				local endIndex = closeIndex and (closeIndex + 1) or n
+			if nextTwo == "--" and source:sub(i + 2, i + 2) == "[" then
+				local _, closeEnd = findLongBracket(i + 2)
+				local endIndex = closeEnd or n
 				appendToLayer("comments", source:sub(i, endIndex))
 				i = endIndex + 1
 			elseif nextTwo == "--" then
@@ -81490,7 +83526,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 				local endIndex = newlineIndex and (newlineIndex - 1) or n
 				appendToLayer("comments", source:sub(i, endIndex))
 				i = endIndex + 1
-			elseif ch == "\"" or ch == "'" then
+			elseif ch == "\"" or ch == "'" or ch == "`" then
 				local quote = ch
 				local j = i + 1
 				local escaped = false
@@ -81510,9 +83546,9 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 				end
 				appendToLayer("strings", source:sub(i, j))
 				i = j + 1
-			elseif nextTwo == "[[" then
-				local closeIndex = source:find("%]%]", i + 2, false)
-				local endIndex = closeIndex and (closeIndex + 1) or n
+			elseif ch == "[" and findLongBracket(i) then
+				local _, closeEnd = findLongBracket(i)
+				local endIndex = closeEnd or n
 				appendToLayer("strings", source:sub(i, endIndex))
 				i = endIndex + 1
 			elseif ch:match("[%a_]") then
@@ -81521,9 +83557,19 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 					j += 1
 				end
 				local token = source:sub(i, j - 1)
-				if keywordSet[token] then
+				local prevChar = prevNonSpace(i - 1)
+				local nextChar = nextNonSpace(j)
+				if NAStuff.ExecutorKeywordSet[token] then
 					appendToLayer("keywords", token)
-				elseif globalSet[token] then
+				elseif NAStuff.ExecutorTypeSet[token] then
+					appendToLayer("keywords", token)
+				elseif prevChar == ":" and nextChar == "(" then
+					appendToLayer("methods", token)
+				elseif prevChar == "." then
+					appendToLayer("properties", token)
+				elseif nextChar == "(" then
+					appendToLayer(NAStuff.ExecutorGlobalSet[token] and "globals" or "functions", token)
+				elseif NAStuff.ExecutorGlobalSet[token] then
 					appendToLayer("globals", token)
 				else
 					appendPlain(token)
@@ -81531,17 +83577,34 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 				i = j
 			elseif ch:match("%d") then
 				local j = i
-				while j <= n and source:sub(j, j):match("[%da-fA-FxX_%.]") do
+				while j <= n and source:sub(j, j):match("[%w_%.]") do
 					j += 1
 				end
 				appendToLayer("numbers", source:sub(i, j - 1))
 				i = j
+			elseif ch:match("[%[%]%(%){}]") then
+				appendToLayer("brackets", ch)
+				i += 1
+			elseif source:sub(i, i + 2) == "..." then
+				appendToLayer("operators", "...")
+				i += 3
+			elseif source:sub(i, i + 2) == "//=" or source:sub(i, i + 2) == "..=" then
+				appendToLayer("operators", source:sub(i, i + 2))
+				i += 3
+			elseif ch:match("[%+%-%*/%%%^#=<>~:;,%.,|&%?]") or nextTwo == ".." or nextTwo == "==" or nextTwo == "~=" or nextTwo == "<=" or nextTwo == ">=" or nextTwo == "//" or nextTwo == "->" then
+				if nextTwo == ".." or nextTwo == "==" or nextTwo == "~=" or nextTwo == "<=" or nextTwo == ">=" or nextTwo == "::" or nextTwo == "//" or nextTwo == "->" then
+					appendToLayer("operators", nextTwo)
+					i += 2
+				else
+					appendToLayer("operators", ch)
+					i += 1
+				end
 			else
 				appendPlain(ch)
 				i += 1
 			end
 		end
-		return table.concat(buffers.keywords), table.concat(buffers.globals), table.concat(buffers.strings), table.concat(buffers.comments), table.concat(buffers.numbers)
+		return table.concat(buffers.keywords), table.concat(buffers.globals), table.concat(buffers.strings), table.concat(buffers.comments), table.concat(buffers.numbers), table.concat(buffers.functions), table.concat(buffers.methods), table.concat(buffers.properties), table.concat(buffers.operators), table.concat(buffers.brackets)
 	end
 
 	local function syncCurrentTabText()
@@ -81551,34 +83614,57 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	local function refreshEditorNow()
 		local source = textBox.Text or ""
 		updatePageInfo()
-		local width, height, lineCount, lineHeight = measureSource(source)
-		textBox.Size = UDim2.new(0, width, 0, height)
-		for _, layer in ipairs({ keywordLayer, globalLayer, stringLayer, commentLayer, numberLayer }) do
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+		local totalLineCount = tab and math.max(#tab.lines, 1) or 1
+		local width, visibleHeight, renderedLineCount, lineHeight = measureSource(source)
+		editorVirtualLineHeight = lineHeight
+		local fullHeight = math.max(getEditorViewportHeight(), totalLineCount * lineHeight + 12)
+		local _, visibleLines = getEditorWindowMetrics()
+		local virtualTotal = math.max(totalLineCount + 1, visibleLines)
+		local maxTopY = math.max(0, (virtualTotal - visibleLines) * lineHeight)
+		local proxyHeight = math.max(fullHeight + lineHeight + 8, (editorScroll.AbsoluteSize.Y or 0) + maxTopY + lineHeight)
+		local yOffset = 0
+		textBox.Position = UDim2.new(0, 8, 0, 0)
+		textBox.Size = UDim2.new(0, width, 0, visibleHeight)
+		for _, layer in ipairs({ keywordLayer, globalLayer, stringLayer, commentLayer, numberLayer, functionLayer, methodLayer, propertyLayer, operatorLayer, bracketLayer }) do
 			layer.Position = textBox.Position
 			layer.Size = textBox.Size
 		end
-		editorScroll.CanvasSize = UDim2.new(0, width + 16, 0, height + 8)
+		local canvasWidth = math.max(editorScroll.AbsoluteSize.X or 1, 8 + width + 2)
+		editorScroll.CanvasSize = UDim2.new(0, canvasWidth, 0, math.max(editorScroll.AbsoluteSize.Y, 1))
+		editorLineScroll.Position = editorScroll.Position
+		editorLineScroll.Size = editorScroll.Size
+		editorLineScroll.CanvasSize = UDim2.new(0, 0, 0, proxyHeight)
+		if NAmanage.CustomScroll and NAmanage.CustomScroll.refreshByTarget then
+			NAmanage.CustomScroll.refreshByTarget(editorScroll)
+			NAmanage.CustomScroll.refreshByTarget(editorLineScroll)
+		end
 		local gutterWidth = 0
 		if cfg.lineNumbers then
-			local digits = #tostring(lineCount)
+			local digits = #tostring(totalLineCount)
 			gutterWidth = math.max(44, 16 + digits * 9)
 			gutter.Size = UDim2.new(0, gutterWidth, 1, 0)
 		end
 		editorScroll.Position = UDim2.new(0, gutterWidth > 0 and (gutterWidth + 6) or 0, 0, 0)
 		editorScroll.Size = UDim2.new(1, gutterWidth > 0 and -(gutterWidth + 6) or 0, 1, 0)
 		local numbers = {}
-		for index = 1, lineCount do
-			numbers[index] = tostring(index)
+		for index = editorVirtualStart, editorVirtualEnd do
+			numbers[#numbers + 1] = tostring(index)
 		end
 		gutterLabel.Text = table.concat(numbers, "\n")
-		gutterLabel.Size = UDim2.new(1, -10, 0, lineCount * lineHeight + 8)
-		local keywordText, globalText, stringText, commentText, numberText = buildHighlightLayers(source)
+		gutterLabel.Size = UDim2.new(1, -10, 0, math.max(renderedLineCount, 1) * lineHeight + 8)
+		local keywordText, globalText, stringText, commentText, numberText, functionText, methodText, propertyText, operatorText, bracketText = buildHighlightLayers(source)
 		keywordLayer.Text = keywordText
 		globalLayer.Text = globalText
 		stringLayer.Text = stringText
 		commentLayer.Text = commentText
 		numberLayer.Text = numberText
-		gutterLabel.Position = UDim2.new(1, -6, 0, -editorScroll.CanvasPosition.Y)
+		functionLayer.Text = functionText
+		methodLayer.Text = methodText
+		propertyLayer.Text = propertyText
+		operatorLayer.Text = operatorText
+		bracketLayer.Text = bracketText
+		gutterLabel.Position = UDim2.new(1, -6, 0, 0)
 	end
 
 	local function queueRefreshEditor()
@@ -81592,42 +83678,156 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		end)
 	end
 
-	local function loadCurrentPage()
-		local tab = normalizeEditorTab(tabs[currentTab])
+	local function loadCurrentPage(preserveScroll)
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
 		if not tab then
+			editorRenderedStart = 1
+			editorRenderedEnd = 1
+			editorRenderedText = ""
 			setEditorBoxText("")
 			updatePageInfo()
 			queueRefreshEditor()
 			return
 		end
-		tab.page = math.clamp(tonumber(tab.page) or 1, 1, math.max(#tab.chunks, 1))
-		setEditorBoxText(tab.chunks[tab.page] or "")
+		local total = math.max(#tab.lines, 1)
+		local lineHeight = getEditorWindowMetrics()
+		local visibleLine = preserveScroll == true and getEditorVisibleLine(total) or math.clamp(tonumber(tab.viewLine) or 1, 1, total)
+		local firstRender, lastRender, firstVisible = getEditorWindowRange(total, visibleLine)
+		editorVirtualStart = firstRender
+		editorVirtualEnd = lastRender
+		tab.viewLine = firstVisible
+		local renderedText = NAmanage.ExecutorSliceEditorLines(tab.lines, editorVirtualStart, editorVirtualEnd)
+		editorRenderedStart = editorVirtualStart
+		editorRenderedEnd = editorVirtualEnd
+		editorRenderedText = renderedText
+		beginEditorTextSet()
+		if preserveScroll ~= true then
+			editorLineScroll.CanvasPosition = Vector2.new(0, math.max(0, (firstVisible - 1) * lineHeight))
+		end
+		textBox.Text = renderedText
+		finishEditorTextSet()
 		updatePageInfo()
 		queueRefreshEditor()
 	end
 
+	editorGetVisibleLines = function()
+		local _, visibleLines = getEditorWindowMetrics()
+		return math.max(1, visibleLines)
+	end
+	editorGetTotalLines = function()
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+		return tab and math.max(#tab.lines + 1, editorGetVisibleLines()) or 1
+	end
+	editorGetViewLine = function()
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+		return tab and getEditorVisibleLine(math.max(#tab.lines, 1)) or 1
+	end
+	editorSetViewLine = function(line)
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+		if not tab then
+			return
+		end
+		commitCurrentPage(true)
+		local total = math.max(#tab.lines, 1)
+		local lineHeight = getEditorWindowMetrics()
+		local nextLine = math.clamp(tonumber(line) or 1, 1, total)
+		tab.viewLine = nextLine
+		editorLineScroll.CanvasPosition = Vector2.new(0, math.max(0, (nextLine - 1) * lineHeight))
+		loadCurrentPage(true)
+	end
+
 	local function turnEditorPage(delta)
-		local tab = normalizeEditorTab(tabs[currentTab])
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
 		if not tab then
 			return
 		end
 		commitCurrentPage()
-		local total = math.max(#tab.chunks, 1)
-		local nextPage = math.clamp((tab.page or 1) + delta, 1, total)
-		if nextPage == tab.page then
+		local _, windowLines = getEditorWindowMetrics()
+		local total = math.max(#tab.lines, 1)
+		local currentLine = getEditorVisibleLine(total)
+		local nextLine = math.clamp(currentLine + (delta * windowLines), 1, total)
+		if nextLine == tab.viewLine then
 			updatePageInfo()
 			return
 		end
-		tab.page = nextPage
+		tab.viewLine = nextLine
+		editorLineScroll.CanvasPosition = Vector2.new(0, math.max(0, (nextLine - 1) * editorVirtualLineHeight))
 		loadCurrentPage()
 		scheduleTabsSave()
-		setStatus("Switched to page "..tostring(nextPage).."/"..tostring(total), colors.subtle)
+		setStatus("Scrolled to line "..tostring(nextLine).."/"..tostring(total), colors.subtle)
 	end
 
-	editorScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-		gutterLabel.Position = UDim2.new(1, -6, 0, -editorScroll.CanvasPosition.Y)
+	editorLineScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		if editorLoading then
+			return
+		end
+		local tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+		local total = tab and math.max(#tab.lines, 1) or 1
+		local _, _, firstVisible, lastVisible = getEditorWindowRange(total)
+		local edgeBuffer = math.max(1, math.floor(editorLineBuffer / 3))
+		if firstVisible < editorVirtualStart or lastVisible > editorVirtualEnd or (firstVisible - editorVirtualStart) < edgeBuffer or (editorVirtualEnd - lastVisible) < edgeBuffer then
+			commitCurrentPage(true)
+			tab = NAmanage.ExecutorNormalizeTab(tabs[currentTab])
+			if tab then
+				tab.viewLine = firstVisible
+			end
+			loadCurrentPage(true)
+		else
+			gutterLabel.Position = UDim2.new(1, -6, 0, 0)
+		end
 	end)
-	editorScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(queueRefreshEditor)
+	local redirectingEditorScroll = false
+	editorScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		if editorLoading or redirectingEditorScroll then
+			return
+		end
+		local y = tonumber(editorScroll.CanvasPosition.Y) or 0
+		if math.abs(y) <= 0.5 then
+			return
+		end
+		redirectingEditorScroll = true
+		if executorVerticalScroll and executorVerticalScroll.scrollBy then
+			local lineDelta = y / math.max(editorVirtualLineHeight, 1)
+			if math.abs(lineDelta) < 1 then
+				lineDelta = y > 0 and 1 or -1
+			end
+			executorVerticalScroll.scrollBy(lineDelta)
+		else
+			editorLineScroll.CanvasPosition = Vector2.new(0, math.max(0, editorLineScroll.CanvasPosition.Y + y))
+		end
+		editorScroll.CanvasPosition = Vector2.new(editorScroll.CanvasPosition.X, 0)
+		redirectingEditorScroll = false
+	end)
+	editorScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		if editorLoading then
+			return
+		end
+		if NAmanage.ExecutorNormalizeTab(tabs[currentTab]) then
+			commitCurrentPage(true)
+			loadCurrentPage(true)
+		else
+			queueRefreshEditor()
+		end
+	end)
+
+	local function handleEditorWheel(input)
+		if not input or input.UserInputType ~= Enum.UserInputType.MouseWheel then
+			return
+		end
+		local wheel = input.Position and input.Position.Z or 0
+		if wheel == 0 then
+			return
+		end
+		local step = math.max(24, getEditorLineHeight() * 3)
+		local horizontal = UserInputService and (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
+		if horizontal and executorHorizontalScroll and executorHorizontalScroll.scrollBy then
+			executorHorizontalScroll.scrollBy(-wheel * step)
+		elseif executorVerticalScroll and executorVerticalScroll.scrollBy then
+			executorVerticalScroll.scrollBy(-wheel * 3)
+		end
+	end
+	editorScroll.InputChanged:Connect(handleEditorWheel)
+	textBox.InputChanged:Connect(handleEditorWheel)
 
 	local function refreshSettingsButtons()
 		syntaxToggle.Text = cfg.syntax and "On" or "Off"
@@ -81666,7 +83866,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		actions.Position = UDim2.new(0, 0, 1, compact and -20 or -22)
 		actions.Size = UDim2.new(1, 0, 0, compact and 24 or 28)
 		actionLayout.CellPadding = UDim2.new(0, compact and 4 or 6, 0, 0)
-		actionLayout.CellSize = UDim2.new(0.1666, compact and -4 or -5, 1, 0)
+		actionLayout.CellSize = UDim2.new(1 / actionButtonCount, compact and -5 or -6, 1, 0)
 		hubList.Size = UDim2.new(1, 0, 1, compact and -174 or -204)
 		hubButtons.Position = UDim2.new(0, 0, 1, compact and -132 or -154)
 		hubButtons.Size = UDim2.new(1, 0, 0, compact and 132 or 154)
@@ -81674,12 +83874,20 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 			btn.Size = UDim2.new(1, 0, 0, compact and 22 or 26)
 			btn.TextSize = compact and 11 or 13
 		end
-		for _, btn in ipairs({ executeButton, clearButton, copyButton, renameButton, duplicateButton, deleteTabButton }) do
-			btn.TextSize = compact and 11 or 13
+		local actionButtons = { executeButton, clearButton, copyButton }
+		if pasteButton then
+			actionButtons[#actionButtons + 1] = pasteButton
+		end
+		actionButtons[#actionButtons + 1] = formatButton
+		actionButtons[#actionButtons + 1] = renameButton
+		actionButtons[#actionButtons + 1] = duplicateButton
+		actionButtons[#actionButtons + 1] = deleteTabButton
+		for _, btn in ipairs(actionButtons) do
+			btn.TextSize = (btn == pasteButton) and (compact and 9 or 10) or (compact and 11 or 13)
 		end
 		textBox.TextSize = compact and 13 or 15
 		gutterLabel.TextSize = textBox.TextSize
-		for _, layer in ipairs({ keywordLayer, globalLayer, stringLayer, commentLayer, numberLayer }) do
+		for _, layer in ipairs({ keywordLayer, globalLayer, stringLayer, commentLayer, numberLayer, functionLayer, methodLayer, propertyLayer, operatorLayer, bracketLayer }) do
 			layer.TextSize = textBox.TextSize
 		end
 	end
@@ -81687,14 +83895,19 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	local function queueExecutorResponsive()
 		applyExecutorFrameSize()
 		updateBodyLayout()
-		queueRefreshEditor()
+		if NAmanage.ExecutorNormalizeTab(tabs[currentTab]) then
+			commitCurrentPage(true)
+			loadCurrentPage(true)
+		else
+			queueRefreshEditor()
+		end
 	end
 
 	local function applySettings(skipSave)
 		cfg.syntax = cfg.syntax == true
 		cfg.lineNumbers = cfg.lineNumbers == true
 		cfg.showHub = cfg.showHub ~= false
-		for _, layer in ipairs({ keywordLayer, globalLayer, stringLayer, commentLayer, numberLayer }) do
+		for _, layer in ipairs({ keywordLayer, globalLayer, stringLayer, commentLayer, numberLayer, functionLayer, methodLayer, propertyLayer, operatorLayer, bracketLayer }) do
 			layer.Visible = cfg.syntax
 		end
 		gutter.Visible = cfg.lineNumbers
@@ -81746,16 +83959,16 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		end)
 	end
 
-	local function selectTab(index)
+	local function selectTab(index, skipCommit)
 		local tab = tabs[index]
 		if not tab then
 			return
 		end
-		if editorLoaded then
+		if editorLoaded and skipCommit ~= true then
 			commitCurrentPage(true)
 		end
 		currentTab = index
-		normalizeEditorTab(tab)
+		NAmanage.ExecutorNormalizeTab(tab)
 		loadCurrentPage()
 		editorLoaded = true
 		updateTabButtonVisuals()
@@ -81770,24 +83983,28 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 			setStatus("Cleared current tab", colors.warn)
 			return
 		end
+		local wasCurrent = index == currentTab
+		if editorLoaded and not wasCurrent then
+			commitCurrentPage(true)
+		end
 		local tab = tabs[index]
 		if tab and tab.holder then
 			tab.holder:Destroy()
 		end
 		table.remove(tabs, index)
-		if currentTab > #tabs then
+		if wasCurrent then
+			currentTab = math.clamp(index, 1, #tabs)
+		elseif currentTab > #tabs then
 			currentTab = #tabs
 		elseif currentTab > index then
 			currentTab -= 1
-		elseif currentTab == index then
-			currentTab = math.max(1, currentTab)
 		end
 		for tabIndex, entry in ipairs(tabs) do
 			if (entry.title or "") == "" then
 				entry.title = "Tab "..tabIndex
 			end
 		end
-		selectTab(currentTab)
+		selectTab(currentTab, true)
 		setStatus("Deleted tab", colors.warn)
 	end
 
@@ -81796,7 +84013,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 			title = initialTitle and tostring(initialTitle) or ("Tab "..(#tabs + 1)),
 			text = tostring(initialText or ""),
 		}
-		normalizeEditorTab(tab)
+		NAmanage.ExecutorNormalizeTab(tab)
 		local holder = InstanceNew("Frame")
 		holder.BackgroundColor3 = colors.tabIdle
 		holder.BorderSizePixel = 0
@@ -81972,7 +84189,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		syncCurrentTabText()
 		local fileName = sanitizeScriptName(name)
 		local path = scriptPath(fileName)
-		local ok, err = pcall(writefile, path, getEditorTabText(tabs[currentTab]))
+		local ok, err = pcall(writefile, path, NAmanage.ExecutorGetTabText(tabs[currentTab]))
 		if ok and (type(isfile) ~= "function" or isfile(path)) then
 			addScriptIndex(fileName)
 			refreshSavedScripts()
@@ -82029,17 +84246,17 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 					if type(decoded.tabs) == "table" then
 						for index, entry in ipairs(decoded.tabs) do
 							if type(entry) == "table" then
-								createTab(entry.text or "", entry.title or ("Tab "..index))
+								createTab(NAmanage.ExecutorRepairTabText(entry.text or ""), entry.title or ("Tab "..index))
 								loaded = true
 							elseif type(entry) == "string" then
-								createTab(entry, "Tab "..index)
+								createTab(NAmanage.ExecutorRepairTabText(entry), "Tab "..index)
 								loaded = true
 							end
 						end
 						currentTab = math.clamp(tonumber(decoded.cur) or 1, 1, math.max(#tabs, 1))
 					elseif type(decoded[1]) == "string" then
 						for index, entry in ipairs(decoded) do
-							createTab(entry, "Tab "..index)
+							createTab(NAmanage.ExecutorRepairTabText(entry), "Tab "..index)
 							loaded = true
 						end
 						currentTab = 1
@@ -82054,10 +84271,15 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	end
 
 	textBox:GetPropertyChangedSignal("Text"):Connect(function()
-		if not editorLoading then
+		if not editorLoading and editorTextLock <= 0 then
 			syncCurrentTabText()
 		end
 		queueRefreshEditor()
+	end)
+	textBox.FocusLost:Connect(function()
+		if editorLoaded and type(saveTabsNow) == "function" then
+			saveTabsNow()
+		end
 	end)
 
 	addTabButton.MouseButton1Click:Connect(function()
@@ -82067,33 +84289,19 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 		setStatus("Created a new tab", colors.success)
 	end)
 
-	local function placeSettingsPanel()
-		settingsPanel.AnchorPoint = Vector2.new(1, 0)
-		settingsPanel.Position = UDim2.new(1, -10, 0, 42)
-	end
-
 	if settingsButton then
 		settingsButton.MouseButton1Click:Connect(function()
-			placeSettingsPanel()
+			NAmanage.ExecutorPlaceSettingsPanel(settingsPanel)
 			settingsPanel.Visible = not settingsPanel.Visible
 		end)
 	end
-	frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(placeSettingsPanel)
+	frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		NAmanage.ExecutorPlaceSettingsPanel(settingsPanel)
+	end)
 
-	local function bindSetting(toggle, hit, key)
-		local function flip()
-			cfg[key] = not cfg[key]
-			applySettings()
-		end
-		toggle.MouseButton1Click:Connect(flip)
-		if hit then
-			hit.MouseButton1Click:Connect(flip)
-		end
-	end
-
-	bindSetting(syntaxToggle, syntaxHit, "syntax")
-	bindSetting(lineNumbersToggle, lineNumbersHit, "lineNumbers")
-	bindSetting(scriptHubToggle, scriptHubHit, "showHub")
+	NAmanage.ExecutorBindSetting(syntaxToggle, syntaxHit, cfg, "syntax", applySettings)
+	NAmanage.ExecutorBindSetting(lineNumbersToggle, lineNumbersHit, cfg, "lineNumbers", applySettings)
+	NAmanage.ExecutorBindSetting(scriptHubToggle, scriptHubHit, cfg, "showHub", applySettings)
 
 	MouseButtonFix(pagePrev, function()
 		turnEditorPage(-1)
@@ -82104,7 +84312,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 
 	executeButton.MouseButton1Click:Connect(function()
 		commitCurrentPage(true)
-		local source = getEditorTabText(tabs[currentTab])
+		local source = NAmanage.ExecutorGetTabText(tabs[currentTab])
 		if source == "" then
 			setStatus("Nothing to execute", colors.warn)
 			return
@@ -82135,12 +84343,61 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	end)
 	copyButton.MouseButton1Click:Connect(function()
 		commitCurrentPage(true)
-		local ok = pcall(setclipboard, getEditorTabText(tabs[currentTab]))
+		local ok = pcall(setclipboard, NAmanage.ExecutorGetTabText(tabs[currentTab]))
 		if ok then
 			setStatus("Copied tab contents", colors.success)
 		else
 			setStatus("Clipboard unavailable", colors.error)
 		end
+	end)
+	if pasteButton then
+		pasteButton.MouseButton1Click:Connect(function()
+			local ok, clip = pcall(getclipboard)
+			if not ok or type(clip) ~= "string" then
+				setStatus("Clipboard unavailable", colors.error)
+				return
+			end
+			local currentText = tostring(textBox.Text or "")
+			local cursor = tonumber(textBox.CursorPosition) or -1
+			local selectionStart = tonumber(textBox.SelectionStart) or -1
+			local startPos
+			local endPos
+			if cursor > 0 and selectionStart > 0 and cursor ~= selectionStart then
+				startPos = math.min(cursor, selectionStart)
+				endPos = math.max(cursor, selectionStart) - 1
+			else
+				startPos = cursor > 0 and cursor or (#currentText + 1)
+				endPos = startPos - 1
+			end
+			startPos = math.clamp(startPos, 1, #currentText + 1)
+			endPos = math.clamp(endPos, 0, #currentText)
+			setEditorBoxText(currentText:sub(1, startPos - 1)..clip..currentText:sub(endPos + 1))
+			pcall(function()
+				textBox.CursorPosition = math.clamp(startPos + #clip, 1, #textBox.Text + 1)
+			end)
+			commitCurrentPage(true)
+			scheduleTabsSave()
+			queueRefreshEditor()
+			setStatus("Pasted clipboard", colors.success)
+		end)
+	end
+	formatButton.MouseButton1Click:Connect(function()
+		commitCurrentPage(true)
+		local tab = tabs[currentTab]
+		local source = NAmanage.ExecutorGetTabText(tab)
+		if source:gsub("%s+", "") == "" then
+			setStatus("Nothing to format", colors.warn)
+			return
+		end
+		local formatted = NAmanage.ExecutorFormatLuaSource(source)
+		if formatted == source then
+			setStatus("Already formatted", colors.subtle)
+			return
+		end
+		setTabFullText(tab, formatted)
+		loadCurrentPage()
+		scheduleTabsSave()
+		setStatus("Formatted Lua/Luau script", colors.success)
 	end)
 	renameButton.MouseButton1Click:Connect(function()
 		renameTab(currentTab)
@@ -82148,7 +84405,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	duplicateButton.MouseButton1Click:Connect(function()
 		commitCurrentPage(true)
 		local tab = tabs[currentTab]
-		local tabIndex = createTab(tab and getEditorTabText(tab) or "", tab and ((tab.title or "Tab").." Copy") or "Copy")
+		local tabIndex = createTab(tab and NAmanage.ExecutorGetTabText(tab) or "", tab and ((tab.title or "Tab").." Copy") or "Copy")
 		selectTab(tabIndex)
 		scheduleTabsSave()
 		setStatus("Duplicated tab", colors.success)
@@ -82214,6 +84471,7 @@ NAmanage.Executor_Init = NAmanage.Executor_Init or function()
 	selectTab(currentTab)
 	queueRefreshEditor()
 	NAStuff.ExecutorRefresh = queueRefreshEditor
+	NAStuff.ExecutorSaveTabs = saveTabsNow
 	setStatus("Executor ready", colors.success)
 	return true
 end
@@ -82234,9 +84492,16 @@ NAmanage.Executor_Toggle = NAmanage.Executor_Toggle or function(forceState)
 	if type(nextState) ~= "boolean" then
 		nextState = not execFrame.Visible
 	end
+	if execFrame.Visible and nextState == false and type(NAStuff.ExecutorSaveTabs) == "function" then
+		pcall(NAStuff.ExecutorSaveTabs)
+	end
 	execFrame.Visible = nextState
 	if execFrame.Visible then
-		NAmanage.centerFrame(execFrame)
+		if type(NAmanage.Executor_ApplyResponsive) == "function" then
+			NAmanage.Executor_ApplyResponsive()
+		else
+			NAmanage.centerFrame(execFrame)
+		end
 		if type(NAStuff.ExecutorRefresh) == "function" then
 			task.defer(NAStuff.ExecutorRefresh)
 		end
@@ -82302,23 +84567,27 @@ NAmanage.Notepad_Init = function()
 		local maxW = math.max(1, math.floor(wide - padX * 2 + 0.5))
 		local maxH = math.max(1, math.floor(tall - padY * 2 + 0.5))
 		local small = IsOnMobile or wide < 900 or tall < 620
-		local minW = math.min(small and 280 or 460, maxW)
-		local minH = math.min(small and 230 or 340, maxH)
 		local curW = tonumber(frame.Size.X.Offset) or 0
 		local curH = tonumber(frame.Size.Y.Offset) or 0
-		if curW <= 0 then
+		local initialized = frame.GetAttribute and NAmanage.GetAttr(frame, "NANotepadDefaultSized") == true
+		if curW <= 0 or not initialized then
 			curW = small and maxW or 720
 		end
-		if curH <= 0 then
+		if curH <= 0 or not initialized then
 			curH = small and maxH or 455
 		end
-		local targetW = math.clamp(curW, minW, maxW)
-		local targetH = math.clamp(curH, minH, maxH)
+		local targetW = math.clamp(math.floor(curW + 0.5), 1, maxW)
+		local targetH = math.clamp(math.floor(curH + 0.5), 1, maxH)
 		frame.AnchorPoint = Vector2.new(0, 0)
-		frame.Size = UDim2.fromOffset(targetW, targetH)
+		if frame.AbsoluteSize.X ~= targetW or frame.AbsoluteSize.Y ~= targetH then
+			frame.Size = UDim2.fromOffset(targetW, targetH)
+		end
+		if frame.SetAttribute then
+			NAmanage.SetAttr(frame, "NANotepadDefaultSized", true)
+		end
 		local x
 		local y
-		if center then
+		if center and not initialized then
 			x = math.floor((wide - targetW) * 0.5 + 0.5)
 			y = math.floor((tall - targetH) * 0.5 + 0.5)
 		else
@@ -82804,11 +85073,171 @@ NAmanage.Notepad_Init = function()
 	body.CanvasSize = UDim2.new(0, 0, 0, 0)
 	body.Position = UDim2.new(0, 10, 0, 48)
 	body.ScrollBarImageColor3 = col.sub
-	body.ScrollBarThickness = 6
+	body.ScrollBarThickness = 0
 	body.ScrollingDirection = Enum.ScrollingDirection.XY
 	body.Size = UDim2.new(1, -20, 1, -88)
 	body.Parent = main
 	skin(body, 10, 1)
+
+	local notepadLineScroll = InstanceNew("ScrollingFrame")
+	notepadLineScroll.Name = "LineScrollProxy"
+	notepadLineScroll.Active = false
+	notepadLineScroll.BackgroundTransparency = 1
+	notepadLineScroll.BorderSizePixel = 0
+	notepadLineScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	notepadLineScroll.Position = body.Position
+	notepadLineScroll.ScrollBarThickness = 0
+	notepadLineScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+	notepadLineScroll.Size = body.Size
+	notepadLineScroll.Visible = false
+	notepadLineScroll.Parent = main
+
+	local function makeNotepadScrollBar(parent, name, axis)
+		local horizontal = axis == "X"
+		local bar = InstanceNew("Frame")
+		bar.Name = name
+		bar.BackgroundColor3 = col.bg3
+		bar.BorderSizePixel = 0
+		bar.Visible = false
+		bar.ZIndex = 35
+		bar.Parent = parent
+		skin(bar, 7, 1)
+
+		local upButton = InstanceNew("TextButton")
+		upButton.Name = horizontal and "Left" or "Up"
+		upButton.AutoButtonColor = false
+		upButton.BackgroundColor3 = col.bg2
+		upButton.BorderSizePixel = 0
+		upButton.Font = Enum.Font.GothamBold
+		upButton.Text = horizontal and "<" or "^"
+		upButton.TextColor3 = col.tx
+		upButton.TextSize = 10
+		upButton.ZIndex = 36
+		upButton.Parent = bar
+		skin(upButton, 5, 1)
+
+		local downButton = InstanceNew("TextButton")
+		downButton.Name = horizontal and "Right" or "Down"
+		downButton.AutoButtonColor = false
+		downButton.BackgroundColor3 = col.bg2
+		downButton.BorderSizePixel = 0
+		downButton.Font = Enum.Font.GothamBold
+		downButton.Text = horizontal and ">" or "v"
+		downButton.TextColor3 = col.tx
+		downButton.TextSize = 10
+		downButton.ZIndex = 36
+		downButton.Parent = bar
+		skin(downButton, 5, 1)
+
+		local track = InstanceNew("Frame")
+		track.Name = "Track"
+		track.BackgroundColor3 = col.bg
+		track.BorderSizePixel = 0
+		track.ZIndex = 36
+		track.Parent = bar
+		skin(track, 5, 1)
+
+		local thumb = InstanceNew("Frame")
+		thumb.Name = "Thumb"
+		thumb.BackgroundColor3 = col.sub
+		thumb.BorderSizePixel = 0
+		thumb.ZIndex = 37
+		thumb.Parent = track
+		skin(thumb, 5, 1)
+
+		if horizontal then
+			upButton.Position = UDim2.new(0, 0, 0, 0)
+			upButton.Size = UDim2.new(0, 16, 1, 0)
+			downButton.AnchorPoint = Vector2.new(1, 0)
+			downButton.Position = UDim2.new(1, 0, 0, 0)
+			downButton.Size = UDim2.new(0, 16, 1, 0)
+			track.Position = UDim2.new(0, 18, 0, 0)
+			track.Size = UDim2.new(1, -36, 1, 0)
+		else
+			upButton.Position = UDim2.new(0, 0, 0, 0)
+			upButton.Size = UDim2.new(1, 0, 0, 16)
+			downButton.AnchorPoint = Vector2.new(0, 1)
+			downButton.Position = UDim2.new(0, 0, 1, 0)
+			downButton.Size = UDim2.new(1, 0, 0, 16)
+			track.Position = UDim2.new(0, 0, 0, 18)
+			track.Size = UDim2.new(1, 0, 1, -36)
+		end
+
+		return {
+			bar = bar,
+			upButton = upButton,
+			downButton = downButton,
+			track = track,
+			thumb = thumb,
+		}
+	end
+
+	local notepadVScroll = makeNotepadScrollBar(main, "CustomScrollBar", "Y")
+	local notepadHScroll = makeNotepadScrollBar(main, "CustomHorizontalScrollBar", "X")
+	local notepadGetVisibleLines
+	local notepadGetTotalLines
+	local notepadGetViewLine
+	local notepadSetViewLine
+	local function layoutNotepadScrollBar(_, target, widgets)
+		local bar = widgets and widgets.bar
+		if not (target and bar and bar.Parent) then
+			return
+		end
+		local parentPos = bar.Parent.AbsolutePosition
+		local relX = math.floor(target.AbsolutePosition.X - parentPos.X + 0.5)
+		local relY = math.floor(target.AbsolutePosition.Y - parentPos.Y + 0.5)
+		local w = math.floor(target.AbsoluteSize.X + 0.5)
+		local h = math.floor(target.AbsoluteSize.Y + 0.5)
+		if bar == notepadHScroll.bar then
+			bar.Position = UDim2.new(0, relX, 0, relY + h - 16)
+			bar.Size = UDim2.new(0, math.max(48, w - 18), 0, 16)
+		else
+			bar.Position = UDim2.new(0, relX + w - 16, 0, relY)
+			bar.Size = UDim2.new(0, 16, 0, math.max(48, h - 18))
+		end
+	end
+
+	local notepadVerticalScroll = NAmanage.CustomScroll and NAmanage.CustomScroll.create and NAmanage.CustomScroll.create("notepad_editor_v", {
+		getWidgets = function()
+			return notepadVScroll
+		end,
+		getTarget = function()
+			return body
+		end,
+		getVisibleSpace = function()
+			return notepadGetVisibleLines and notepadGetVisibleLines() or 1
+		end,
+		getTotalSpace = function()
+			return notepadGetTotalLines and notepadGetTotalLines() or 1
+		end,
+		getPosition = function()
+			return math.max(0, (notepadGetViewLine and notepadGetViewLine() or 1) - 1)
+		end,
+		setPosition = function(_, _, pos)
+			if notepadSetViewLine then
+				notepadSetViewLine(math.floor((tonumber(pos) or 0) + 1.5))
+			end
+		end,
+		layoutForTarget = layoutNotepadScrollBar,
+		step = 3,
+	})
+	local notepadHorizontalScroll = NAmanage.CustomScroll and NAmanage.CustomScroll.create and NAmanage.CustomScroll.create("notepad_editor_h", {
+		axis = "X",
+		getWidgets = function()
+			return notepadHScroll
+		end,
+		getTarget = function()
+			return body
+		end,
+		layoutForTarget = layoutNotepadScrollBar,
+		step = 96,
+	})
+	if notepadVerticalScroll and notepadVerticalScroll.install then
+		notepadVerticalScroll.install()
+	end
+	if notepadHorizontalScroll and notepadHorizontalScroll.install then
+		notepadHorizontalScroll.install()
+	end
 
 	local box = InstanceNew("TextBox")
 	box.BackgroundTransparency = 1
@@ -82879,7 +85308,7 @@ NAmanage.Notepad_Init = function()
 	pageText.Font = Enum.Font.GothamSemibold
 	pageText.LayoutOrder = 2
 	pageText.Size = UDim2.new(0, 86, 1, 0)
-	pageText.Text = "Page 1/1"
+	pageText.Text = "Lines 1-1/1"
 	pageText.TextColor3 = col.sub
 	pageText.TextSize = 12
 	pageText.Parent = pageBar
@@ -82937,7 +85366,9 @@ NAmanage.Notepad_Init = function()
 		end
 		body.Position = UDim2.new(0, inner, 0, inner + toolH + 8)
 		body.Size = UDim2.new(1, -inner * 2, 1, -(inner + toolH + 44))
-		body.ScrollBarThickness = compact and 4 or 6
+		body.ScrollBarThickness = 0
+		notepadLineScroll.Position = body.Position
+		notepadLineScroll.Size = body.Size
 		bottom.Position = UDim2.new(0, inner, 1, compact and -28 or -32)
 		bottom.Size = UDim2.new(1, -inner * 2, 0, 24)
 		status.TextSize = compact and 11 or 12
@@ -82965,38 +85396,18 @@ NAmanage.Notepad_Init = function()
 		return select(2, s:gsub("\n", "")) + 1
 	end
 
-	local chunkLimit = 12000
+	local notepadLineBuffer = 24
 	local chunks = { "" }
 	local page = 1
+	local visibleEndLine = 1
+	local notepadLineHeight = 19
 	local loadingText = false
 
 	local function splitText(source)
-		source = tostring(source or "")
-		if source == "" then
-			return { "" }
-		end
+		source = tostring(source or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
 		local out = {}
-		local pos = 1
-		while pos <= #source do
-			local endPos = math.min(pos + chunkLimit - 1, #source)
-			if endPos < #source then
-				local seg = source:sub(pos, endPos)
-				local cut
-				local from = 1
-				while true do
-					local found = seg:find("\n", from, true)
-					if not found then
-						break
-					end
-					cut = found
-					from = found + 1
-				end
-				if cut and cut > math.floor(chunkLimit * 0.35) then
-					endPos = pos + cut - 1
-				end
-			end
-			out[#out + 1] = source:sub(pos, endPos)
-			pos = endPos + 1
+		for line in (source.."\n"):gmatch("(.-)\n") do
+			out[#out + 1] = line
 		end
 		if #out == 0 then
 			out[1] = ""
@@ -83004,39 +85415,86 @@ NAmanage.Notepad_Init = function()
 		return out
 	end
 
-	local function buildFullText(useBox)
-		local out = {}
-		for i = 1, math.max(#chunks, 1) do
-			if useBox and i == page then
-				out[i] = tostring(box.Text or "")
-			else
-				out[i] = tostring(chunks[i] or "")
-			end
+	local function joinText(lines)
+		if type(lines) ~= "table" or #lines == 0 then
+			return ""
 		end
-		return table.concat(out, "")
+		return table.concat(lines, "\n")
 	end
 
-	local function compactPages(preferPage)
-		preferPage = tonumber(preferPage) or page or 1
-		for i = #chunks, 1, -1 do
-			if #chunks > 1 and tostring(chunks[i] or "") == "" then
-				table.remove(chunks, i)
-				if preferPage > i then
-					preferPage -= 1
-				elseif preferPage == i then
-					preferPage = math.min(i, #chunks)
-				end
+	local function sliceText(lines, firstLine, lastLine)
+		local out = {}
+		firstLine = math.max(1, tonumber(firstLine) or 1)
+		lastLine = math.max(firstLine, tonumber(lastLine) or firstLine)
+		for line = firstLine, lastLine do
+			out[#out + 1] = tostring(lines[line] or "")
+		end
+		if #out == 0 then
+			out[1] = ""
+		end
+		return table.concat(out, "\n")
+	end
+
+	local function replaceTextRange(lines, firstLine, lastLine, text)
+		lines = type(lines) == "table" and lines or { "" }
+		local inserted = splitText(text)
+		local rebuilt = {}
+		firstLine = math.clamp(tonumber(firstLine) or 1, 1, math.max(#lines + 1, 1))
+		lastLine = math.clamp(tonumber(lastLine) or (firstLine - 1), firstLine - 1, math.max(#lines, firstLine - 1))
+		for line = 1, firstLine - 1 do
+			rebuilt[#rebuilt + 1] = tostring(lines[line] or "")
+		end
+		for _, lineText in ipairs(inserted) do
+			rebuilt[#rebuilt + 1] = tostring(lineText or "")
+		end
+		for line = lastLine + 1, #lines do
+			rebuilt[#rebuilt + 1] = tostring(lines[line] or "")
+		end
+		if #rebuilt == 0 then
+			rebuilt[1] = ""
+		end
+		return rebuilt
+	end
+
+	local function syncVisibleNotepadText()
+		if not loadingText then
+			local oldEnd = visibleEndLine
+			chunks = replaceTextRange(chunks, page, oldEnd, box.Text or "")
+			visibleEndLine = page + #splitText(box.Text or "") - 1
+		end
+	end
+
+	local function countNotepadChars()
+		local total = math.max(#chunks - 1, 0)
+		for _, line in ipairs(chunks) do
+			total += #tostring(line or "")
+		end
+		return total
+	end
+
+	local function buildFullText(useBox)
+		if useBox and not loadingText then
+			syncVisibleNotepadText()
+		end
+		return joinText(chunks)
+	end
+
+	local function getNotepadLineHeight()
+		local fallback = tonumber(box.TextSize) or 15
+		local widthService = TextService or TextServiceRef
+		if widthService and widthService.GetTextSize then
+			local ok, measured = pcall(function()
+				return widthService:GetTextSize("M", box.TextSize, box.Font, Vector2.new(1000, 1000)).Y
+			end)
+			if ok and type(measured) == "number" then
+				return math.max(1, math.ceil(measured))
 			end
 		end
-		if #chunks == 0 then
-			chunks[1] = ""
-			preferPage = 1
-		end
-		return math.clamp(preferPage, 1, math.max(#chunks, 1))
+		return math.max(1, math.ceil(fallback))
 	end
 
 	local function measureNotepadText(source)
-		local lineHeight = box.TextSize + 4
+		local lineHeight = getNotepadLineHeight()
 		local longest = 0
 		local lines = 0
 		for line in ((source or "").."\n"):gmatch("(.-)\n") do
@@ -83060,34 +85518,85 @@ NAmanage.Notepad_Init = function()
 		if lines <= 0 then
 			lines = 1
 		end
-		local w = math.max(body.AbsoluteSize.X - 20, longest + 28)
-		local h = math.max(body.AbsoluteSize.Y - 20, lines * lineHeight + 18)
+		local viewWidth = math.max(1, (body.AbsoluteSize.X or 0) - 18)
+		local w = math.max(viewWidth, longest + 12)
+		local h = math.max(math.max(body.AbsoluteSize.Y - 30, 1), lines * lineHeight + 18)
 		return w, h
+	end
+
+	local function getNotepadViewportHeight()
+		return math.max(1, (body.AbsoluteSize.Y or 0) - 30)
+	end
+
+	local function getNotepadWindowMetrics()
+		local lineHeight = getNotepadLineHeight()
+		local visible = math.max(1, math.floor(getNotepadViewportHeight() / math.max(lineHeight, 1)))
+		return lineHeight, visible
+	end
+
+	local function getNotepadVisibleLine(totalLines)
+		local lineHeight = getNotepadWindowMetrics()
+		local total = math.max(tonumber(totalLines) or 1, 1)
+		return math.clamp(math.floor(math.max(notepadLineScroll.CanvasPosition.Y, 0) / math.max(lineHeight, 1)) + 1, 1, total)
+	end
+
+	local function getNotepadWindowRange(totalLines, firstVisibleLine)
+		local _, visibleLines = getNotepadWindowMetrics()
+		local total = math.max(tonumber(totalLines) or 1, 1)
+		local firstVisible = math.clamp(tonumber(firstVisibleLine) or getNotepadVisibleLine(total), 1, total)
+		local lastVisible = math.clamp(firstVisible + visibleLines - 1, firstVisible, total)
+		local firstRender = firstVisible
+		local lastRender = lastVisible
+		return firstRender, lastRender, firstVisible, lastVisible
 	end
 
 	local function updEditorSize()
 		local w, h = measureNotepadText(box.Text or "")
+		notepadLineHeight = getNotepadLineHeight()
+		local fullHeight = math.max(getNotepadViewportHeight(), math.max(#chunks, 1) * notepadLineHeight + 18)
+		local _, visibleLines = getNotepadWindowMetrics()
+		local virtualTotal = math.max(#chunks + 1, visibleLines)
+		local maxTopY = math.max(0, (virtualTotal - visibleLines) * notepadLineHeight)
+		local proxyHeight = math.max(fullHeight + notepadLineHeight + 16, (body.AbsoluteSize.Y or 0) + maxTopY + notepadLineHeight)
+		box.Position = UDim2.new(0, 8, 0, 8)
 		box.Size = UDim2.new(0, w, 0, h)
-		body.CanvasSize = UDim2.new(0, w + 16, 0, h + 16)
+		local canvasWidth = math.max(body.AbsoluteSize.X or 1, 8 + w + 2)
+		body.CanvasSize = UDim2.new(0, canvasWidth, 0, math.max(body.AbsoluteSize.Y, 1))
+		notepadLineScroll.Position = body.Position
+		notepadLineScroll.Size = body.Size
+		notepadLineScroll.CanvasSize = UDim2.new(0, 0, 0, proxyHeight)
+		if NAmanage.CustomScroll and NAmanage.CustomScroll.refreshByTarget then
+			NAmanage.CustomScroll.refreshByTarget(body)
+			NAmanage.CustomScroll.refreshByTarget(notepadLineScroll)
+		end
 	end
 
 	local function updCount()
-		local tx = buildFullText(true)
-		count.Text = tostring(#tx).." chars | "..tostring(lineCount(tx)).." lines"
+		syncVisibleNotepadText()
+		count.Text = tostring(countNotepadChars()).." chars | "..tostring(math.max(#chunks, 1)).." lines"
 		page = math.clamp(tonumber(page) or 1, 1, math.max(#chunks, 1))
-		pageText.Text = "Page "..tostring(page).."/"..tostring(math.max(#chunks, 1))
-		pageBar.Visible = #chunks > 1
-		pagePrev.Visible = #chunks > 1
-		pageNext.Visible = #chunks > 1
+		visibleEndLine = math.clamp(visibleEndLine, page, math.max(#chunks, 1))
+		local _, _, firstVisible, lastVisible = getNotepadWindowRange(math.max(#chunks, 1))
+		pageText.Text = "Lines "..tostring(firstVisible).."-"..tostring(lastVisible).."/"..tostring(math.max(#chunks, 1))
+		pageBar.Visible = #chunks > math.max(1, lastVisible - firstVisible + 1)
+		pagePrev.Visible = false
+		pageNext.Visible = false
 		updEditorSize()
 	end
 
-	local function loadPage(nextPage)
-		page = math.clamp(tonumber(nextPage) or page or 1, 1, math.max(#chunks, 1))
+	local function loadPage(nextPage, preserveScroll)
+		local total = math.max(#chunks, 1)
+		local lineHeight = getNotepadWindowMetrics()
+		local visibleLine = preserveScroll == true and getNotepadVisibleLine(total) or math.clamp(tonumber(nextPage) or page or 1, 1, total)
+		local firstRender, lastRender, firstVisible = getNotepadWindowRange(total, visibleLine)
+		page = firstRender
+		visibleEndLine = lastRender
 		loadingText = true
-		box.Text = tostring(chunks[page] or "")
+		if preserveScroll ~= true then
+			notepadLineScroll.CanvasPosition = Vector2.new(0, math.max(0, (firstVisible - 1) * lineHeight))
+		end
+		box.Text = sliceText(chunks, page, visibleEndLine)
 		loadingText = false
-		body.CanvasPosition = Vector2.new(0, 0)
 		updCount()
 	end
 
@@ -83095,34 +85604,47 @@ NAmanage.Notepad_Init = function()
 		if loadingText then
 			return
 		end
-		local oldPage = page
-		local oldTotal = math.max(#chunks, 1)
-		chunks[page] = tostring(box.Text or "")
-		local reloadPage = false
-		if #chunks[page] > chunkLimit then
-			local parts = splitText(chunks[page])
-			table.remove(chunks, page)
-			for i = #parts, 1, -1 do
-				table.insert(chunks, page, parts[i])
-			end
-			page = math.clamp(oldPage, 1, math.max(#chunks, 1))
-			reloadPage = true
-			setStatus("Text split into pages to avoid Roblox TextBox limits", col.warn)
-		else
-			page = compactPages(page)
-			reloadPage = oldTotal ~= #chunks or page ~= oldPage
-		end
-		if reloadPage then
-			loadingText = true
-			box.Text = tostring(chunks[page] or "")
-			loadingText = false
-		end
+		local oldEnd = visibleEndLine
+		chunks = replaceTextRange(chunks, page, oldEnd, box.Text or "")
+		visibleEndLine = page + #splitText(box.Text or "") - 1
 		updCount()
 	end
 
+	local function refreshNotepadViewport()
+		if loadingText then
+			return
+		end
+		commitPage()
+		loadPage(getNotepadVisibleLine(math.max(#chunks, 1)), true)
+	end
+
+	notepadGetVisibleLines = function()
+		local _, visibleLines = getNotepadWindowMetrics()
+		return math.max(1, visibleLines)
+	end
+	notepadGetTotalLines = function()
+		return math.max(#chunks + 1, notepadGetVisibleLines())
+	end
+	notepadGetViewLine = function()
+		return getNotepadVisibleLine(math.max(#chunks, 1))
+	end
+	notepadSetViewLine = function(line)
+		commitPage()
+		local total = math.max(#chunks, 1)
+		local lineHeight = getNotepadWindowMetrics()
+		local nextLine = math.clamp(tonumber(line) or 1, 1, total)
+		notepadLineScroll.CanvasPosition = Vector2.new(0, math.max(0, (nextLine - 1) * lineHeight))
+		loadPage(nextLine, true)
+	end
+
 	local function setFullText(source)
+		loadingText = true
 		chunks = splitText(source)
 		page = 1
+		visibleEndLine = 1
+		notepadLineScroll.CanvasPosition = Vector2.new(0, 0)
+		body.CanvasPosition = Vector2.new(0, 0)
+		loadingText = false
 		loadPage(1)
 	end
 
@@ -83281,31 +85803,86 @@ NAmanage.Notepad_Init = function()
 			updCount()
 		end
 	end)
-	body:GetPropertyChangedSignal("AbsoluteSize"):Connect(updEditorSize)
+	notepadLineScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		if loadingText then
+			return
+		end
+		local total = math.max(#chunks, 1)
+		local _, _, firstVisible, lastVisible = getNotepadWindowRange(total)
+		local edgeBuffer = math.max(1, math.floor(notepadLineBuffer / 3))
+		if firstVisible < page or lastVisible > visibleEndLine or (firstVisible - page) < edgeBuffer or (visibleEndLine - lastVisible) < edgeBuffer then
+			commitPage()
+			loadPage(firstVisible, true)
+		end
+	end)
+	local redirectingNotepadScroll = false
+	body:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		if loadingText or redirectingNotepadScroll then
+			return
+		end
+		local y = tonumber(body.CanvasPosition.Y) or 0
+		if math.abs(y) <= 0.5 then
+			return
+		end
+		redirectingNotepadScroll = true
+		if notepadVerticalScroll and notepadVerticalScroll.scrollBy then
+			local lineDelta = y / math.max(notepadLineHeight, 1)
+			if math.abs(lineDelta) < 1 then
+				lineDelta = y > 0 and 1 or -1
+			end
+			notepadVerticalScroll.scrollBy(lineDelta)
+		else
+			notepadLineScroll.CanvasPosition = Vector2.new(0, math.max(0, notepadLineScroll.CanvasPosition.Y + y))
+		end
+		body.CanvasPosition = Vector2.new(body.CanvasPosition.X, 0)
+		redirectingNotepadScroll = false
+	end)
+	local function handleNotepadWheel(input)
+		if not input or input.UserInputType ~= Enum.UserInputType.MouseWheel then
+			return
+		end
+		local wheel = input.Position and input.Position.Z or 0
+		if wheel == 0 then
+			return
+		end
+		local step = math.max(24, getNotepadLineHeight() * 3)
+		local horizontal = UserInputService and (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
+		if horizontal and notepadHorizontalScroll and notepadHorizontalScroll.scrollBy then
+			notepadHorizontalScroll.scrollBy(-wheel * step)
+		elseif notepadVerticalScroll and notepadVerticalScroll.scrollBy then
+			notepadVerticalScroll.scrollBy(-wheel * 3)
+		end
+	end
+	body.InputChanged:Connect(handleNotepadWheel)
+	box.InputChanged:Connect(handleNotepadWheel)
+	body:GetPropertyChangedSignal("AbsoluteSize"):Connect(refreshNotepadViewport)
 	frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 		updateNotepadLayout()
-		updEditorSize()
+		refreshNotepadViewport()
 	end)
 	cont:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 		updateNotepadLayout()
-		updEditorSize()
+		refreshNotepadViewport()
 	end)
 	NAStuff.NotepadRefresh = function()
 		applyNotepadResponsive(false)
 		updateNotepadLayout()
-		updEditorSize()
-		updCount()
+		refreshNotepadViewport()
 	end
 	MouseButtonFix(pagePrev, function()
 
 		commitPage()
-		loadPage(page - 1)
-		setStatus("Page "..tostring(page).."/"..tostring(math.max(#chunks, 1)), col.sub)
+		local _, visibleLines = getNotepadWindowMetrics()
+		local nextLine = math.clamp(getNotepadVisibleLine(math.max(#chunks, 1)) - visibleLines, 1, math.max(#chunks, 1))
+		loadPage(nextLine)
+		setStatus("Line "..tostring(nextLine).."/"..tostring(math.max(#chunks, 1)), col.sub)
 	end)
 	MouseButtonFix(pageNext, function()
 		commitPage()
-		loadPage(page + 1)
-		setStatus("Page "..tostring(page).."/"..tostring(math.max(#chunks, 1)), col.sub)
+		local _, visibleLines = getNotepadWindowMetrics()
+		local nextLine = math.clamp(getNotepadVisibleLine(math.max(#chunks, 1)) + visibleLines, 1, math.max(#chunks, 1))
+		loadPage(nextLine)
+		setStatus("Line "..tostring(nextLine).."/"..tostring(math.max(#chunks, 1)), col.sub)
 	end)
 	nameBox.FocusLost:Connect(function()
 		local e = tostring(nameBox.Text or ""):match("(%.[%w]+)$")
@@ -83342,8 +85919,7 @@ NAmanage.Notepad_Init = function()
 				if frame and frame.Parent then
 					applyNotepadResponsive(frame.Visible == true)
 					updateNotepadLayout()
-					updEditorSize()
-					updCount()
+					refreshNotepadViewport()
 				end
 			end)
 		end))
@@ -83354,8 +85930,7 @@ NAmanage.Notepad_Init = function()
 				if frame and frame.Parent then
 					applyNotepadResponsive(frame.Visible == true)
 					updateNotepadLayout()
-					updEditorSize()
-					updCount()
+					refreshNotepadViewport()
 				end
 			end)
 		end))
@@ -83366,8 +85941,7 @@ NAmanage.Notepad_Init = function()
 				if frame and frame.Parent then
 					applyNotepadResponsive(frame.Visible == true)
 					updateNotepadLayout()
-					updEditorSize()
-					updCount()
+					refreshNotepadViewport()
 				end
 			end)
 		end))
@@ -83438,13 +86012,13 @@ if NAUIMANAGER.WaypointFrame then NAgui.resizeable(NAUIMANAGER.WaypointFrame) en
 if NAUIMANAGER.BindersFrame then NAgui.resizeable(NAUIMANAGER.BindersFrame) end
 if NAUIMANAGER.ExecutorFrame then
 	local exMin = IsOnMobile and Vector2.new(340, 280) or Vector2.new(680, 420)
-	NAgui.resizeable(NAUIMANAGER.ExecutorFrame, exMin, Vector2.new(1600, 1000))
+	NAgui.resizeable(NAUIMANAGER.ExecutorFrame, exMin, Vector2.new(5000, 5000))
 end
 if NAUIMANAGER.NotepadFrame then
 	local npVp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
 	local npSmall = IsOnMobile or npVp.X < 720 or npVp.Y < 520
 	local npMin = npSmall and Vector2.new(280, 230) or Vector2.new(460, 340)
-	NAgui.resizeable(NAUIMANAGER.NotepadFrame, npMin, Vector2.new(1500, 980))
+	NAgui.resizeable(NAUIMANAGER.NotepadFrame, npMin, Vector2.new(5000, 5000))
 end
 
 NAmanage.Executor_Init()
@@ -84846,7 +87420,8 @@ NAmanage.CommandKeybindsAdd=function()
 	DoNotif("Press a key, key combo, or click combo to bind to a command...", 3)
 	NAStuff._capturingCommandKeybind = true
 	bindConn = UIS.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or not listening then return end
+		if not listening then return end
+		if gameProcessed and input and input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 		local keyName = NAmanage.CKBBind(input, UIS)
 		if not keyName then
 			return
@@ -85402,7 +87977,7 @@ NAmanage.CommandKeybindsUIRefresh=function()
 					end
 					ui.argsBox.Text = Concat(parts, " ")
 				else
-					ui.argsB.Text = ""
+					ui.argsBox.Text = ""
 				end
 			end
 
@@ -85590,7 +88165,7 @@ NAmanage.CommandKeybindsUIWire=function()
 
 			conn = UserInputService.InputBegan:Connect(function(input, gp)
 				if tok ~= ui._capTok then return end
-				if gp then return end
+				if gp and input and input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 
 				local keyName = NAmanage.CKBBind(input, UserInputService)
 				if not keyName then
@@ -88036,6 +90611,7 @@ function NAgui._saveIconSettings()
 		assetValue = ""
 	end
 	pcall(NAmanage.NASettingsSet, "customIconAssetId", assetValue)
+	pcall(NAmanage.NASettingsSet, "customIconLocalPath", typeof(NAStuff.CustomIcon.localPath) == "string" and NAStuff.CustomIcon.localPath or "")
 	pcall(NAmanage.NASettingsSet, "customIconEnabled", NAStuff.CustomIcon.enabled == true)
 end
 
@@ -88470,43 +91046,112 @@ SpawnCall(function()
 			return env
 		end
 
+		local function readGuardValue(keyName, primary)
+			if keyName == nil then
+				return nil
+			end
+
+			local value = nil
+			local function take(source)
+				if value ~= nil or type(source) ~= "table" then
+					return
+				end
+
+				local ok, got = pcall(rawget, source, keyName)
+				if ok and got ~= nil then
+					value = got
+					return
+				end
+
+				ok, got = pcall(function()
+					return source[keyName]
+				end)
+				if ok and got ~= nil then
+					value = got
+				end
+			end
+
+			take(primary)
+			take(_na_env)
+			take(_na_shared)
+			take(_na_boot and _na_boot.runtimeEnv)
+			take(_G)
+			take(_na_boot and _na_boot.hostEnv)
+
+			return value
+		end
+
+		local function writeGuardValue(keyName, value, primary)
+			if keyName == nil then
+				return
+			end
+
+			local function put(target)
+				if type(target) == "table" then
+					pcall(function()
+						target[keyName] = value
+					end)
+				end
+			end
+
+			put(primary)
+			put(_na_env)
+			put(_na_shared)
+			put(_na_boot and _na_boot.runtimeEnv)
+			put(_G)
+			put(_na_boot and _na_boot.hostEnv)
+		end
+
+		local guardSeedKeys = {
+			"NAverify",
+			"NAKey",
+			"__NAKeySource",
+			"adminName",
+			"mainName",
+			"testingName",
+			"NATestingVer",
+			"ActivateAprilMode",
+			"NA_LOADED",
+			"ltseverydayyou_NA",
+			"__NAServiceResolver",
+		}
+		if type(guardFlagName) == "string" and guardFlagName ~= "" then
+			guardSeedKeys[#guardSeedKeys + 1] = guardFlagName
+		end
+
 		local function mirrorGuardState(env)
 			env = (type(env) == "table" and env) or guardEnv()
 
-			local key = tostring(env.NAverify or (_G and _G.NAverify) or (_na_shared and _na_shared.NAverify) or "")
+			local key = readGuardValue("NAverify", env)
+			if key == nil then
+				key = readGuardValue("NAKey", env)
+			end
+			key = tostring(key or "")
 			if key ~= "" then
-				env.NAverify = key
-				pcall(function() _G.NAverify = key end)
-				if _na_shared then
-					pcall(function() _na_shared.NAverify = key end)
-				end
+				writeGuardValue("NAverify", key, env)
+				writeGuardValue("NAKey", key, env)
+				writeGuardValue("__NAKeySource", "NA testing.lua", env)
 			end
 
-			local flag = env[guardFlagName]
-			if flag == nil and _G then
-				flag = _G[guardFlagName]
+			local flag = readGuardValue(guardFlagName, env)
+			if flag == nil and type(guardFlagValue) == "string" and guardFlagValue ~= "" then
+				flag = guardFlagValue
 			end
-			if flag == nil and _na_shared then
-				flag = _na_shared[guardFlagName]
-			end
-			if flag ~= nil then
-				env[guardFlagName] = flag
-				pcall(function() _G[guardFlagName] = flag end)
-				if _na_shared then
-					pcall(function() _na_shared[guardFlagName] = flag end)
-				end
+			if flag ~= nil and type(guardFlagName) == "string" and guardFlagName ~= "" then
+				writeGuardValue(guardFlagName, flag, env)
 			end
 		end
 
 		local function primeGuardEnv()
 			local env = guardEnv()
+			local testing = readGuardValue("NATestingVer", env) == true
 
 			local resolvedName = tostring(adminName or "")
 			if resolvedName ~= "NA" and resolvedName ~= "Nameless Admin" and resolvedName ~= "NA Testing" then
-				resolvedName = (env.NATestingVer == true) and "NA Testing" or "Nameless Admin"
+				resolvedName = testing and "NA Testing" or "Nameless Admin"
 			end
 			if resolvedName == "" then
-				resolvedName = (env.NATestingVer == true) and "NA Testing" or "Nameless Admin"
+				resolvedName = testing and "NA Testing" or "Nameless Admin"
 			end
 
 			if type(env.adminName) ~= "string" or env.adminName == "" then
@@ -88515,24 +91160,18 @@ SpawnCall(function()
 			if type(env.mainName) ~= "string" or env.mainName == "" then
 				env.mainName = "Nameless Admin"
 			end
-			if env.NATestingVer == true then
+			if testing then
 				env.testingName = "NA Testing"
 			elseif type(env.testingName) ~= "string" or env.testingName == "" then
 				env.testingName = resolvedName
 			end
 
-			pcall(function()
-				_G.adminName = env.adminName
-				_G.mainName = env.mainName
-				_G.testingName = env.testingName
-			end)
-			if _na_shared then
-				pcall(function()
-					_na_shared.adminName = env.adminName
-					_na_shared.mainName = env.mainName
-					_na_shared.testingName = env.testingName
-				end)
-			end
+			writeGuardValue("adminName", env.adminName, env)
+			writeGuardValue("mainName", env.mainName, env)
+			writeGuardValue("testingName", env.testingName, env)
+			writeGuardValue("NATestingVer", testing, env)
+			writeGuardValue("NA_LOADED", readGuardValue("NA_LOADED", env) or naFlagValue, env)
+			writeGuardValue("ltseverydayyou_NA", readGuardValue("ltseverydayyou_NA", env) or naFlagValue, env)
 
 			mirrorGuardState(env)
 			return env
@@ -88542,34 +91181,20 @@ SpawnCall(function()
 			sharedEnv = (type(sharedEnv) == "table" and sharedEnv) or guardEnv()
 			local sandbox = {}
 			local sandboxShared = {}
-			local seedKeys = {
-				"NAverify",
-				"adminName",
-				"mainName",
-				"testingName",
-				"NATestingVer",
-			}
-			if type(guardFlagName) == "string" and guardFlagName ~= "" then
-				seedKeys[#seedKeys + 1] = guardFlagName
-			end
 
-			for _, keyName in ipairs(seedKeys) do
-				local value = sharedEnv[keyName]
-				if value == nil and _G then
-					value = _G[keyName]
-				end
+			for _, keyName in ipairs(guardSeedKeys) do
+				local value = readGuardValue(keyName, sharedEnv)
 				if value ~= nil then
 					sandbox[keyName] = value
-				end
-
-				local sharedValue = _na_shared and _na_shared[keyName] or nil
-				if sharedValue == nil then
-					sharedValue = value
-				end
-				if sharedValue ~= nil then
-					sandboxShared[keyName] = sharedValue
+					sandboxShared[keyName] = value
 				end
 			end
+
+			setmetatable(sandboxShared, {
+				__index = function(_, key)
+					return readGuardValue(key, sharedEnv)
+				end
+			})
 
 			sandbox.shared = sandboxShared
 			sandbox._G = sandbox
@@ -88591,7 +91216,7 @@ SpawnCall(function()
 					elseif key == "getfenv" then
 						return sandbox.getfenv
 					end
-					return sharedEnv[key]
+					return readGuardValue(key, sharedEnv)
 				end
 			})
 
@@ -88605,33 +91230,14 @@ SpawnCall(function()
 				return
 			end
 
-			local keys = {
-				"NAverify",
-				"adminName",
-				"mainName",
-				"testingName",
-				"NATestingVer",
-			}
-			if type(guardFlagName) == "string" and guardFlagName ~= "" then
-				keys[#keys + 1] = guardFlagName
-			end
-
 			local sandboxShared = rawget(sandboxEnv, "shared")
-			for _, keyName in ipairs(keys) do
+			for _, keyName in ipairs(guardSeedKeys) do
 				local value = rawget(sandboxEnv, keyName)
 				if value == nil and type(sandboxShared) == "table" then
 					value = rawget(sandboxShared, keyName)
 				end
 				if value ~= nil then
-					sharedEnv[keyName] = value
-					pcall(function()
-						_G[keyName] = value
-					end)
-					if _na_shared then
-						pcall(function()
-							_na_shared[keyName] = value
-						end)
-					end
+					writeGuardValue(keyName, value, sharedEnv)
 				end
 			end
 
@@ -97695,11 +100301,29 @@ NAmanage.ApplyJump = function(val)
 	if hum then
 		if hum.UseJumpPower ~= false then
 			hum.JumpPower = val
-		elseif hum.ChangeState then
-			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		else
+			hum.JumpHeight = val
 		end
 	end
 end
+
+NAgui.addSection("Methods")
+NAgui.addToggle("Safe Speed Method", NAStuff.SafeSpeedMethod ~= false, function(state)
+	NAStuff.SafeSpeedMethod = state ~= false
+	NAmanage.NASettingsSet("safeSpeedMethod", NAStuff.SafeSpeedMethod)
+	NAmanage.SyncSpeedMethodState()
+end)
+NAmanage.RegisterToggleAutoSync("Safe Speed Method", function()
+	return NAStuff.SafeSpeedMethod ~= false
+end)
+
+NAgui.addToggle("Safe Jump Method", NAStuff.SafeJumpMethod ~= false, function(state)
+	NAStuff.SafeJumpMethod = state ~= false
+	NAmanage.NASettingsSet("safeJumpMethod", NAStuff.SafeJumpMethod)
+end)
+NAmanage.RegisterToggleAutoSync("Safe Jump Method", function()
+	return NAStuff.SafeJumpMethod ~= false
+end)
 
 NAStuff.CustomMovementSounds = NAStuff.CustomMovementSounds or {
 	Enabled = false,
