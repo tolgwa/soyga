@@ -1,3 +1,6 @@
+--[[
+	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
+]]
 --// SERVICES
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,7 +12,8 @@ getgenv().WalkSpeedValue = 16
 getgenv().SpeedEnabled = true
 getgenv().AntiSlide = true
 getgenv().FlyEnabled = false
-getgenv().NoclipEnabled = false  -- ← YENİ
+getgenv().NoclipEnabled = false
+getgenv().InfiniteJumpEnabled = true  -- ← YENİ
 
 --// STATE & CONNECTIONS
 local currentRoot = nil
@@ -19,6 +23,7 @@ local mainLoopConn = nil
 local flyToggleConn = nil
 local charAddedConn = nil
 local noclipConnection = nil
+local jumpRequestConn = nil  -- ← YENİ
 
 --// FLY STATE
 local flying = false
@@ -28,6 +33,32 @@ local flyCtrl = {f = 0, b = 0, l = 0, r = 0}
 local flyMaxSpeed = 80
 local flyInputBegan = nil
 local flyInputEnded = nil
+
+--// ==================== INFINITE JUMP ====================
+local function setupInfiniteJump()
+	if jumpRequestConn then
+		jumpRequestConn:Disconnect()
+		jumpRequestConn = nil
+	end
+	
+	if getgenv().InfiniteJumpEnabled and currentHum and currentHum.Health > 0 then
+		jumpRequestConn = UIS.JumpRequest:Connect(function()
+			if getgenv().InfiniteJumpEnabled and currentHum and currentHum.Health > 0 then
+				currentHum:ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+		end)
+	end
+end
+
+--// B TUŞU - INFINITE JUMP TOGGLE
+UIS.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.B then
+		getgenv().InfiniteJumpEnabled = not getgenv().InfiniteJumpEnabled
+		print("Infinite Jump: " .. tostring(getgenv().InfiniteJumpEnabled))
+		setupInfiniteJump()
+	end
+end)
 
 --// ==================== FLY FONKSİYONLARI ====================
 local function startFly()
@@ -171,11 +202,15 @@ local function applyMovementSettings(char)
 		startNoclip()
 	end
 
+	-- Infinite Jump kurulumu
+	setupInfiniteJump()
+
 	local diedConn = hum.Died:Connect(function()
 		currentHum = nil
 		currentRoot = nil
 		if flying then stopFly() end
 		stopNoclip()
+		if jumpRequestConn then jumpRequestConn:Disconnect() jumpRequestConn = nil end
 		for _, conn in ipairs(characterConnections) do pcall(function() conn:Disconnect() end) end
 		table.clear(characterConnections)
 	end)
@@ -259,11 +294,16 @@ Sec:NewToggle("Noclip", "Duvarlardan geçmeni sağlar", function(state)
 	end
 end)
 
+Sec:NewToggle("Infinite Jump", "Sürekli zıplamanı sağlar (B tuşu)", function(state)
+	getgenv().InfiniteJumpEnabled = state
+	setupInfiniteJump()
+end)
+
 Sec:NewSlider("Fly Hızı", "Uçuş hızı (20-200)", 200, 20, function(s)
 	flyMaxSpeed = s
 end)
 
-Sec:NewLabel("F tuşu ile Fly aç/kapa")
+Sec:NewLabel("F tuşu = Fly | B tuşu = Infinite Jump")
 
 Sec:NewKeybind("Menüyü Gizle/Göster", "Sağ Alt", Enum.KeyCode.RightAlt, function()
 	Library:ToggleUI()
@@ -277,10 +317,12 @@ end)
 function unloadScript()
 	if flying then stopFly() end
 	stopNoclip()
+	if jumpRequestConn then jumpRequestConn:Disconnect() jumpRequestConn = nil end
 
 	getgenv().SpeedEnabled = false
 	getgenv().AntiSlide = false
 	getgenv().NoclipEnabled = false
+	getgenv().InfiniteJumpEnabled = false
 
 	if currentHum then currentHum.WalkSpeed = 16 end
 	if currentRoot then 
@@ -312,4 +354,4 @@ end
 
 charAddedConn = player.CharacterAdded:Connect(setupCharacter)
 
-print("✅ Kontrol Paneli + Noclip Yüklendi! (F tuşu = Fly | Noclip Toggle eklendi)")
+print("✅ Kontrol Paneli + Noclip + Infinite Jump Yüklendi! (F=Fly | B=Infinite Jump)")
