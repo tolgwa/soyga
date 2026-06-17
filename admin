@@ -314,7 +314,6 @@ end)
 local HighlightTab = Window:NewTab("Highlight")
 local HighlightSec = HighlightTab:NewSection("Oyuncu Highlight")
 HighlightSec:NewLabel("Açık olan oyuncular yeşil çerçeveyle işaretlenir")
-HighlightSec:NewLabel("made by alae")  -- istenen kredi etiketi
 
 -- Highlight işlevleri
 local playerHighlightData = {}  -- player -> {toggleObj, charConnection}
