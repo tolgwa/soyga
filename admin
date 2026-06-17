@@ -302,7 +302,7 @@ end)
 
 Sec:NewLabel("F tuşu = Fly | B tuşu = Infinite Jump")
 
-Sec:NewKeybind("Menüyü Gizle/Göster", "Sağ Alt", Enum.KeyCode.RightAlt, function()
+Sec:NewKeybind("Menüyü Gizle/Göster", "Sağ Alt", Enum.KeyCode.RightControl, function()
 	Library:ToggleUI()
 end)
 
