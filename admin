@@ -1,6 +1,3 @@
---[[
-	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
-]]
 --// SERVICES
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,11 +6,11 @@ local player = Players.LocalPlayer
 
 --// VARIABLES
 getgenv().WalkSpeedValue = 16
-getgenv().SpeedEnabled = true
-getgenv().AntiSlide = true
+getgenv().SpeedEnabled = false          -- Başlangıçta kapalı
+getgenv().AntiSlide = false             -- Başlangıçta kapalı
 getgenv().FlyEnabled = false
 getgenv().NoclipEnabled = false
-getgenv().InfiniteJumpEnabled = true  -- ← YENİ
+getgenv().InfiniteJumpEnabled = true
 
 --// STATE & CONNECTIONS
 local currentRoot = nil
@@ -23,7 +20,7 @@ local mainLoopConn = nil
 local flyToggleConn = nil
 local charAddedConn = nil
 local noclipConnection = nil
-local jumpRequestConn = nil  -- ← YENİ
+local jumpRequestConn = nil
 
 --// FLY STATE
 local flying = false
@@ -197,12 +194,10 @@ local function applyMovementSettings(char)
 		root.CustomPhysicalProperties = PhysicalProperties.new(100, 0.45, 0.5, 1, 1)
 	end
 
-	-- Noclip kontrolü
 	if getgenv().NoclipEnabled then
 		startNoclip()
 	end
 
-	-- Infinite Jump kurulumu
 	setupInfiniteJump()
 
 	local diedConn = hum.Died:Connect(function()
@@ -257,6 +252,8 @@ end)
 --// ==================== UI ====================
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 local Window = Library.CreateLib("Kontrol Paneli", "DarkTheme")
+
+-- Ana hareket ayarları sekmesi
 local Tab = Window:NewTab("Ayarlar")
 local Sec = Tab:NewSection("Hareket Kontrol")
 
@@ -313,6 +310,97 @@ Sec:NewButton("❌ Scripti ve Menüyü Tamamen Kapat", "Tüm hileleri siler ve n
 	unloadScript()
 end)
 
+-- ==================== HIGHLIGHT (YENİ) ====================
+local HighlightTab = Window:NewTab("Highlight")
+local HighlightSec = HighlightTab:NewSection("Oyuncu Highlight")
+HighlightSec:NewLabel("Açık olan oyuncular yeşil çerçeveyle işaretlenir")
+HighlightSec:NewLabel("made by alae")  -- istenen kredi etiketi
+
+-- Highlight işlevleri
+local playerHighlightData = {}  -- player -> {toggleObj, charConnection}
+
+local function addHighlightToCharacter(char)
+	if char:FindFirstChild("PlayerHighlight") then return end
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "PlayerHighlight"
+	highlight.FillColor = Color3.fromRGB(0, 255, 0)
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = char
+end
+
+local function removeHighlightFromPlayer(player)
+	local char = player.Character
+	if char then
+		local existing = char:FindFirstChild("PlayerHighlight")
+		if existing then existing:Destroy() end
+	end
+end
+
+local function addPlayerToggle(plr)
+	if plr == player then return end -- kendini listeleme
+	if playerHighlightData[plr] then return end
+
+	-- toggle'ı oluştur
+	local toggleObj = HighlightSec:NewToggle(plr.Name, "Seçiliyken highlight aktif", function(state)
+		local data = playerHighlightData[plr]
+		if not data then return end
+
+		if state then
+			-- highlight ekle
+			if plr.Character then
+				addHighlightToCharacter(plr.Character)
+			end
+			-- karakter eklenince tekrar eklenmesi için dinleyici kur
+			data.charConnection = plr.CharacterAdded:Connect(function(char)
+				addHighlightToCharacter(char)
+			end)
+		else
+			-- highlight kaldır
+			removeHighlightFromPlayer(plr)
+			if data.charConnection then
+				data.charConnection:Disconnect()
+				data.charConnection = nil
+			end
+		end
+	end)
+
+	playerHighlightData[plr] = {
+		toggleObj = toggleObj,
+		charConnection = nil
+	}
+end
+
+local function removePlayerToggle(plr)
+	local data = playerHighlightData[plr]
+	if not data then return end
+
+	if data.charConnection then
+		data.charConnection:Disconnect()
+	end
+	-- highlight temizle
+	removeHighlightFromPlayer(plr)
+	-- UI’daki toggle’ı yok et
+	pcall(function() data.toggleObj.ToggleFrame:Destroy() end)
+	playerHighlightData[plr] = nil
+end
+
+-- Mevcut oyuncuları ekle
+for _, p in ipairs(Players:GetPlayers()) do
+	addPlayerToggle(p)
+end
+
+-- Yeni giren oyuncular
+Players.PlayerAdded:Connect(function(plr)
+	task.wait(0.5)
+	addPlayerToggle(plr)
+end)
+
+-- Ayrılan oyuncuları temizle
+Players.PlayerRemoving:Connect(function(plr)
+	removePlayerToggle(plr)
+end)
+
 --// ==================== UNLOAD ====================
 function unloadScript()
 	if flying then stopFly() end
@@ -338,6 +426,13 @@ function unloadScript()
 		pcall(function() conn:Disconnect() end)
 	end
 
+	-- Highlight cleanup (tüm verileri sil)
+	for plr, data in pairs(playerHighlightData) do
+		if data.charConnection then data.charConnection:Disconnect() end
+		pcall(function() data.toggleObj.ToggleFrame:Destroy() end)
+	end
+	table.clear(playerHighlightData)
+
 	-- Kavo UI temizleme
 	local targetGui = (gethui and gethui()) or game:GetService("CoreGui")
 	for _, v in pairs(targetGui:GetChildren()) do
@@ -354,4 +449,4 @@ end
 
 charAddedConn = player.CharacterAdded:Connect(setupCharacter)
 
-print("✅ Kontrol Paneli + Noclip + Infinite Jump Yüklendi! (F=Fly | B=Infinite Jump)")
+print("✅ Kontrol Paneli + Noclip + Infinite Jump + Highlight Yüklendi! (F=Fly | B=Infinite Jump)")
