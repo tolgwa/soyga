@@ -1,16 +1,34 @@
+--[[
+    Tüm özellikleri birleştirilmiş betik:
+    - Hız Hilesi (Speed)
+    - Ani Durma (Anti-Slide)
+    - Noclip
+    - Uçma (Fly – F tuşu)
+    - Infinite Jump (B tuşu ile toggle, sürekli zıplama)
+    - Auto BunnyHop (Boşluk tutarak zemine değdiğinde zıplama)
+    - Oyuncu Highlight (UI üzerinden seçim)
+    - Kontrol Paneli UI (Kavo UI)
+    - Betiği tamamen kapatma butonu
+
+    Versiyon: Final-Entegre
+]]--
+
+repeat task.wait() until game:IsLoaded()
+
 --// SERVICES
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 --// VARIABLES
 getgenv().WalkSpeedValue = 16
-getgenv().SpeedEnabled = false          -- Başlangıçta kapalı
-getgenv().AntiSlide = false             -- Başlangıçta kapalı
+getgenv().SpeedEnabled = false
+getgenv().AntiSlide = false
 getgenv().FlyEnabled = false
 getgenv().NoclipEnabled = false
-getgenv().InfiniteJumpEnabled = true
+getgenv().InfiniteJumpEnabled = false          -- B tuşu ile kontrol edilecek
+getgenv().BHopEnabled = true                   -- Başlangıçta açık (Auto BunnyHop)
 
 --// STATE & CONNECTIONS
 local currentRoot = nil
@@ -21,6 +39,8 @@ local flyToggleConn = nil
 local charAddedConn = nil
 local noclipConnection = nil
 local jumpRequestConn = nil
+local bhopConn = nil           -- BHop için StateChanged bağlantısı
+local bhopSpacePressed = false
 
 --// FLY STATE
 local flying = false
@@ -31,225 +51,261 @@ local flyMaxSpeed = 80
 local flyInputBegan = nil
 local flyInputEnded = nil
 
---// ==================== INFINITE JUMP ====================
-local function setupInfiniteJump()
-	if jumpRequestConn then
-		jumpRequestConn:Disconnect()
-		jumpRequestConn = nil
-	end
-	
-	if getgenv().InfiniteJumpEnabled and currentHum and currentHum.Health > 0 then
-		jumpRequestConn = UIS.JumpRequest:Connect(function()
-			if getgenv().InfiniteJumpEnabled and currentHum and currentHum.Health > 0 then
-				currentHum:ChangeState(Enum.HumanoidStateType.Jumping)
-			end
-		end)
-	end
+--// ==================== AUTO BUNNYHOP ====================
+local function setupBHop()
+    -- Mevcut bağlantıyı temizle
+    if bhopConn then
+        bhopConn:Disconnect()
+        bhopConn = nil
+    end
+
+    if getgenv().BHopEnabled and currentHum and currentHum.Health > 0 then
+        bhopConn = currentHum.StateChanged:Connect(function(_, newState)
+            if newState == Enum.HumanoidStateType.Landed 
+                and bhopSpacePressed 
+                and getgenv().BHopEnabled 
+                and currentHum 
+                and currentHum.Health > 0 then
+                currentHum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end)
+    end
 end
 
---// B TUŞU - INFINITE JUMP TOGGLE
-UIS.InputBegan:Connect(function(input, processed)
-	if processed then return end
-	if input.KeyCode == Enum.KeyCode.B then
-		getgenv().InfiniteJumpEnabled = not getgenv().InfiniteJumpEnabled
-		print("Infinite Jump: " .. tostring(getgenv().InfiniteJumpEnabled))
-		setupInfiniteJump()
-	end
+-- Space basılı tutma durumunu izle (BHop için)
+UIS.InputBegan:Connect(function(input, gpe)
+    if input.KeyCode == Enum.KeyCode.Space and not gpe then
+        bhopSpacePressed = true
+    end
 end)
 
---// ==================== FLY FONKSİYONLARI ====================
+UIS.InputEnded:Connect(function(input, gpe)
+    if input.KeyCode == Enum.KeyCode.Space then
+        bhopSpacePressed = false
+    end
+end)
+
+--// ==================== INFINITE JUMP (B tuşu) ====================
+local function setupInfiniteJump()
+    if jumpRequestConn then
+        jumpRequestConn:Disconnect()
+        jumpRequestConn = nil
+    end
+
+    if getgenv().InfiniteJumpEnabled and currentHum and currentHum.Health > 0 then
+        jumpRequestConn = UIS.JumpRequest:Connect(function()
+            if getgenv().InfiniteJumpEnabled and currentHum and currentHum.Health > 0 then
+                currentHum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end)
+    end
+end
+
+-- B tuşu - Infinite Jump toggle
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.B then
+        getgenv().InfiniteJumpEnabled = not getgenv().InfiniteJumpEnabled
+        print("Infinite Jump: " .. tostring(getgenv().InfiniteJumpEnabled))
+        setupInfiniteJump()
+    end
+end)
+
+--// ==================== FLY FUNCTIONS ====================
 local function startFly()
-	local char = player.Character
-	if not char then return end
-	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	local rootPart = char:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not rootPart then return end
+    local char = player.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    local rootPart = char:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
 
-	flying = true
-	char.Animate.Disabled = true
+    flying = true
+    char.Animate.Disabled = true
 
-	for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
-		track:AdjustSpeed(0)
-	end
+    for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+        track:AdjustSpeed(0)
+    end
 
-	for _, state in pairs(Enum.HumanoidStateType:GetEnumItems()) do
-		pcall(function() humanoid:SetStateEnabled(state, false) end)
-	end
+    for _, state in pairs(Enum.HumanoidStateType:GetEnumItems()) do
+        pcall(function() humanoid:SetStateEnabled(state, false) end)
+    end
 
-	humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
-	humanoid.PlatformStand = true
+    humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+    humanoid.PlatformStand = true
 
-	local torso = char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-	if not torso then return end
+    local torso = char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+    if not torso then return end
 
-	flyBG = Instance.new("BodyGyro", torso)
-	flyBG.P = 9e4
-	flyBG.maxTorque = Vector3.new(9e9, 9e9, 9e9)
-	flyBG.CFrame = torso.CFrame
+    flyBG = Instance.new("BodyGyro", torso)
+    flyBG.P = 9e4
+    flyBG.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.CFrame = torso.CFrame
 
-	flyBV = Instance.new("BodyVelocity", torso)
-	flyBV.Velocity = Vector3.new(0, 0, 0)
-	flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBV = Instance.new("BodyVelocity", torso)
+    flyBV.Velocity = Vector3.new(0, 0, 0)
+    flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
 
-	flyInputBegan = UIS.InputBegan:Connect(function(input, processed)
-		if processed then return end
-		if input.KeyCode == Enum.KeyCode.W then flyCtrl.f = 1 end
-		if input.KeyCode == Enum.KeyCode.S then flyCtrl.b = -1 end
-		if input.KeyCode == Enum.KeyCode.A then flyCtrl.l = -1 end
-		if input.KeyCode == Enum.KeyCode.D then flyCtrl.r = 1 end
-	end)
+    flyInputBegan = UIS.InputBegan:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == Enum.KeyCode.W then flyCtrl.f = 1 end
+        if input.KeyCode == Enum.KeyCode.S then flyCtrl.b = -1 end
+        if input.KeyCode == Enum.KeyCode.A then flyCtrl.l = -1 end
+        if input.KeyCode == Enum.KeyCode.D then flyCtrl.r = 1 end
+    end)
 
-	flyInputEnded = UIS.InputEnded:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.W then flyCtrl.f = 0 end
-		if input.KeyCode == Enum.KeyCode.S then flyCtrl.b = 0 end
-		if input.KeyCode == Enum.KeyCode.A then flyCtrl.l = 0 end
-		if input.KeyCode == Enum.KeyCode.D then flyCtrl.r = 0 end
-	end)
+    flyInputEnded = UIS.InputEnded:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.W then flyCtrl.f = 0 end
+        if input.KeyCode == Enum.KeyCode.S then flyCtrl.b = 0 end
+        if input.KeyCode == Enum.KeyCode.A then flyCtrl.l = 0 end
+        if input.KeyCode == Enum.KeyCode.D then flyCtrl.r = 0 end
+    end)
 
-	spawn(function()
-		while flying and humanoid and humanoid.Parent and humanoid.Health > 0 do
-			RunService.RenderStepped:Wait()
-			local cam = workspace.CurrentCamera
+    spawn(function()
+        while flying and humanoid and humanoid.Parent and humanoid.Health > 0 do
+            RunService.RenderStepped:Wait()
+            local cam = workspace.CurrentCamera
 
-			if flyCtrl.l + flyCtrl.r ~= 0 or flyCtrl.f + flyCtrl.b ~= 0 then
-				flyBV.Velocity = ((cam.CFrame.LookVector * (flyCtrl.f + flyCtrl.b)) + 
-				                 (cam.CFrame * CFrame.new(flyCtrl.l + flyCtrl.r, (flyCtrl.f + flyCtrl.b) * 0.2, 0)).Position - cam.CFrame.Position) * flyMaxSpeed
-			else
-				flyBV.Velocity = Vector3.new(0, 0, 0)
-			end
+            if flyCtrl.l + flyCtrl.r ~= 0 or flyCtrl.f + flyCtrl.b ~= 0 then
+                flyBV.Velocity = ((cam.CFrame.LookVector * (flyCtrl.f + flyCtrl.b)) + 
+                                 (cam.CFrame * CFrame.new(flyCtrl.l + flyCtrl.r, (flyCtrl.f + flyCtrl.b) * 0.2, 0)).Position - cam.CFrame.Position) * flyMaxSpeed
+            else
+                flyBV.Velocity = Vector3.new(0, 0, 0)
+            end
 
-			flyBG.CFrame = cam.CFrame * CFrame.Angles(-math.rad((flyCtrl.f + flyCtrl.b) * 50), 0, 0)
-		end
-	end)
+            flyBG.CFrame = cam.CFrame * CFrame.Angles(-math.rad((flyCtrl.f + flyCtrl.b) * 50), 0, 0)
+        end
+    end)
 end
 
 local function stopFly()
-	flying = false
-	if flyBG then flyBG:Destroy() flyBG = nil end
-	if flyBV then flyBV:Destroy() flyBV = nil end
-	if flyInputBegan then flyInputBegan:Disconnect() flyInputBegan = nil end
-	if flyInputEnded then flyInputEnded:Disconnect() flyInputEnded = nil end
+    flying = false
+    if flyBG then flyBG:Destroy() flyBG = nil end
+    if flyBV then flyBV:Destroy() flyBV = nil end
+    if flyInputBegan then flyInputBegan:Disconnect() flyInputBegan = nil end
+    if flyInputEnded then flyInputEnded:Disconnect() flyInputEnded = nil end
 
-	local char = player.Character
-	if char then
-		local humanoid = char:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.PlatformStand = false
-			for _, state in pairs(Enum.HumanoidStateType:GetEnumItems()) do
-				pcall(function() humanoid:SetStateEnabled(state, true) end)
-			end
-			humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-		end
-		pcall(function() char.Animate.Disabled = false end)
-	end
+    local char = player.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+            for _, state in pairs(Enum.HumanoidStateType:GetEnumItems()) do
+                pcall(function() humanoid:SetStateEnabled(state, true) end)
+            end
+            humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+        end
+        pcall(function() char.Animate.Disabled = false end)
+    end
 end
 
 --// ==================== NOCLIP ====================
 local function startNoclip()
-	if noclipConnection then return end
-	
-	noclipConnection = RunService.Stepped:Connect(function()
-		if not getgenv().NoclipEnabled then
-			noclipConnection:Disconnect()
-			noclipConnection = nil
-			return
-		end
+    if noclipConnection then return end
 
-		local char = player.Character
-		if char then
-			for _, v in pairs(char:GetDescendants()) do
-				if v:IsA("BasePart") then
-					v.CanCollide = false
-				end
-			end
-		end
-	end)
+    noclipConnection = RunService.Stepped:Connect(function()
+        if not getgenv().NoclipEnabled then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+            return
+        end
+
+        local char = player.Character
+        if char then
+            for _, v in pairs(char:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.CanCollide = false
+                end
+            end
+        end
+    end)
 end
 
 local function stopNoclip()
-	getgenv().NoclipEnabled = false
-	if noclipConnection then
-		noclipConnection:Disconnect()
-		noclipConnection = nil
-	end
+    getgenv().NoclipEnabled = false
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
 end
 
 --// ==================== HAREKET AYARLARI ====================
 local function applyMovementSettings(char)
-	for _, conn in ipairs(characterConnections) do pcall(function() conn:Disconnect() end) end
-	table.clear(characterConnections)
+    for _, conn in ipairs(characterConnections) do pcall(function() conn:Disconnect() end) end
+    table.clear(characterConnections)
 
-	local hum = char:WaitForChild("Humanoid", 5)
-	local root = char:WaitForChild("HumanoidRootPart", 5)
-	if not hum or not root then return end
+    local hum = char:WaitForChild("Humanoid", 5)
+    local root = char:WaitForChild("HumanoidRootPart", 5)
+    if not hum or not root then return end
 
-	currentHum = hum
-	currentRoot = root
+    currentHum = hum
+    currentRoot = root
 
-	if getgenv().SpeedEnabled then
-		hum.WalkSpeed = getgenv().WalkSpeedValue
-	end
+    if getgenv().SpeedEnabled then
+        hum.WalkSpeed = getgenv().WalkSpeedValue
+    end
 
-	if getgenv().AntiSlide then
-		root.CustomPhysicalProperties = PhysicalProperties.new(100, 0.45, 0.5, 1, 1)
-	end
+    if getgenv().AntiSlide then
+        root.CustomPhysicalProperties = PhysicalProperties.new(100, 0.45, 0.5, 1, 1)
+    end
 
-	if getgenv().NoclipEnabled then
-		startNoclip()
-	end
+    if getgenv().NoclipEnabled then
+        startNoclip()
+    end
 
-	setupInfiniteJump()
+    setupInfiniteJump()
+    setupBHop()                      -- BHop bağlantısını kur
 
-	local diedConn = hum.Died:Connect(function()
-		currentHum = nil
-		currentRoot = nil
-		if flying then stopFly() end
-		stopNoclip()
-		if jumpRequestConn then jumpRequestConn:Disconnect() jumpRequestConn = nil end
-		for _, conn in ipairs(characterConnections) do pcall(function() conn:Disconnect() end) end
-		table.clear(characterConnections)
-	end)
-	table.insert(characterConnections, diedConn)
+    local diedConn = hum.Died:Connect(function()
+        currentHum = nil
+        currentRoot = nil
+        if flying then stopFly() end
+        stopNoclip()
+        if jumpRequestConn then jumpRequestConn:Disconnect() jumpRequestConn = nil end
+        if bhopConn then bhopConn:Disconnect() bhopConn = nil end
+        for _, conn in ipairs(characterConnections) do pcall(function() conn:Disconnect() end) end
+        table.clear(characterConnections)
+    end)
+    table.insert(characterConnections, diedConn)
 end
 
 local function setupCharacter(char)
-	task.wait(0.25)
-	if flying then stopFly() end
-	applyMovementSettings(char)
+    task.wait(0.25)
+    if flying then stopFly() end
+    applyMovementSettings(char)
 end
 
 --// ANA LOOP
 mainLoopConn = RunService.Heartbeat:Connect(function()
-	if not currentHum or not currentRoot then return end
+    if not currentHum or not currentRoot then return end
 
-	if not flying and getgenv().SpeedEnabled and currentHum.WalkSpeed ~= getgenv().WalkSpeedValue then
-		currentHum.WalkSpeed = getgenv().WalkSpeedValue
-	end
+    if not flying and getgenv().SpeedEnabled and currentHum.WalkSpeed ~= getgenv().WalkSpeedValue then
+        currentHum.WalkSpeed = getgenv().WalkSpeedValue
+    end
 
-	if not flying and getgenv().AntiSlide then
-		local moveMag = currentHum.MoveDirection.Magnitude
-		if moveMag < 0.1 then
-			local vel = currentRoot.AssemblyLinearVelocity
-			if math.abs(vel.X) > 0.05 or math.abs(vel.Z) > 0.05 then
-				currentRoot.AssemblyLinearVelocity = Vector3.new(0, vel.Y, 0)
-			end
-		end
-	end
+    if not flying and getgenv().AntiSlide then
+        local moveMag = currentHum.MoveDirection.Magnitude
+        if moveMag < 0.1 then
+            local vel = currentRoot.AssemblyLinearVelocity
+            if math.abs(vel.X) > 0.05 or math.abs(vel.Z) > 0.05 then
+                currentRoot.AssemblyLinearVelocity = Vector3.new(0, vel.Y, 0)
+            end
+        end
+    end
 end)
 
 --// F TUŞU FLY
 flyToggleConn = UIS.InputBegan:Connect(function(input, processed)
-	if processed then return end
-	if input.KeyCode == Enum.KeyCode.F then
-		if flying then
-			stopFly()
-		else
-			startFly()
-		end
-	end
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.F then
+        if flying then
+            stopFly()
+        else
+            startFly()
+        end
+    end
 end)
 
---// ==================== UI ====================
+--// ==================== UI (KAVO) ====================
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 local Window = Library.CreateLib("Kontrol Paneli", "DarkTheme")
 
@@ -258,194 +314,189 @@ local Tab = Window:NewTab("Ayarlar")
 local Sec = Tab:NewSection("Hareket Kontrol")
 
 Sec:NewToggle("Hız Hilesi Aktif", "Hızı sabit tutar", function(state)
-	getgenv().SpeedEnabled = state
-	if currentHum and state then
-		currentHum.WalkSpeed = getgenv().WalkSpeedValue
-	end
+    getgenv().SpeedEnabled = state
+    if currentHum and state then
+        currentHum.WalkSpeed = getgenv().WalkSpeedValue
+    end
 end)
 
 Sec:NewSlider("Hız Ayarı", "Karakter hızı (16-500)", 500, 16, function(s)
-	getgenv().WalkSpeedValue = s
-	if currentHum and getgenv().SpeedEnabled then
-		currentHum.WalkSpeed = s
-	end
+    getgenv().WalkSpeedValue = s
+    if currentHum and getgenv().SpeedEnabled then
+        currentHum.WalkSpeed = s
+    end
 end)
 
 Sec:NewToggle("Ani Durma (Anti-Slide)", "Durduğunda kaymayı keser", function(state)
-	getgenv().AntiSlide = state
-	if currentRoot then
-		if state then
-			currentRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 0.45, 0.5, 1, 1)
-		else
-			currentRoot.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5)
-		end
-	end
+    getgenv().AntiSlide = state
+    if currentRoot then
+        if state then
+            currentRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 0.45, 0.5, 1, 1)
+        else
+            currentRoot.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5)
+        end
+    end
 end)
 
 Sec:NewToggle("Noclip", "Duvarlardan geçmeni sağlar", function(state)
-	getgenv().NoclipEnabled = state
-	if state then
-		startNoclip()
-	else
-		stopNoclip()
-	end
+    getgenv().NoclipEnabled = state
+    if state then
+        startNoclip()
+    else
+        stopNoclip()
+    end
 end)
 
-Sec:NewToggle("Infinite Jump", "Sürekli zıplamanı sağlar (B tuşu)", function(state)
-	getgenv().InfiniteJumpEnabled = state
-	setupInfiniteJump()
+Sec:NewToggle("Infinite Jump (B tuşu)", "Boşluğa basılı tutunca sürekli zıplar", function(state)
+    getgenv().InfiniteJumpEnabled = state
+    setupInfiniteJump()
+end)
+
+Sec:NewToggle("Auto BunnyHop", "Boşluk tutarken zemine değdiğinde zıpla", function(state)
+    getgenv().BHopEnabled = state
+    setupBHop()
 end)
 
 Sec:NewSlider("Fly Hızı", "Uçuş hızı (20-200)", 200, 20, function(s)
-	flyMaxSpeed = s
+    flyMaxSpeed = s
 end)
 
-Sec:NewLabel("F tuşu = Fly | B tuşu = Infinite Jump")
+Sec:NewLabel("F tuşu = Fly | B tuşu = Infinite Jump | Boşluk tut = BHop")
 
 Sec:NewKeybind("Menüyü Gizle/Göster", "Sağ Alt", Enum.KeyCode.RightControl, function()
-	Library:ToggleUI()
+    Library:ToggleUI()
 end)
 
 Sec:NewButton("❌ Scripti ve Menüyü Tamamen Kapat", "Tüm hileleri siler ve normale döndürür", function()
-	unloadScript()
+    unloadScript()
 end)
 
--- ==================== HIGHLIGHT (YENİ) ====================
+-- ==================== HIGHLIGHT ====================
 local HighlightTab = Window:NewTab("Highlight")
 local HighlightSec = HighlightTab:NewSection("Oyuncu Highlight")
 HighlightSec:NewLabel("Açık olan oyuncular yeşil çerçeveyle işaretlenir")
 
--- Highlight işlevleri
-local playerHighlightData = {}  -- player -> {toggleObj, charConnection}
+local playerHighlightData = {}
 
 local function addHighlightToCharacter(char)
-	if char:FindFirstChild("PlayerHighlight") then return end
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "PlayerHighlight"
-	highlight.FillColor = Color3.fromRGB(0, 255, 0)
-	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = char
+    if char:FindFirstChild("PlayerHighlight") then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "PlayerHighlight"
+    highlight.FillColor = Color3.fromRGB(0, 255, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = char
 end
 
 local function removeHighlightFromPlayer(player)
-	local char = player.Character
-	if char then
-		local existing = char:FindFirstChild("PlayerHighlight")
-		if existing then existing:Destroy() end
-	end
+    local char = player.Character
+    if char then
+        local existing = char:FindFirstChild("PlayerHighlight")
+        if existing then existing:Destroy() end
+    end
 end
 
 local function addPlayerToggle(plr)
-	if plr == player then return end -- kendini listeleme
-	if playerHighlightData[plr] then return end
+    if plr == player then return end
+    if playerHighlightData[plr] then return end
 
-	-- toggle'ı oluştur
-	local toggleObj = HighlightSec:NewToggle(plr.Name, "Seçiliyken highlight aktif", function(state)
-		local data = playerHighlightData[plr]
-		if not data then return end
+    local toggleObj = HighlightSec:NewToggle(plr.Name, "Seçiliyken highlight aktif", function(state)
+        local data = playerHighlightData[plr]
+        if not data then return end
 
-		if state then
-			-- highlight ekle
-			if plr.Character then
-				addHighlightToCharacter(plr.Character)
-			end
-			-- karakter eklenince tekrar eklenmesi için dinleyici kur
-			data.charConnection = plr.CharacterAdded:Connect(function(char)
-				addHighlightToCharacter(char)
-			end)
-		else
-			-- highlight kaldır
-			removeHighlightFromPlayer(plr)
-			if data.charConnection then
-				data.charConnection:Disconnect()
-				data.charConnection = nil
-			end
-		end
-	end)
+        if state then
+            if plr.Character then
+                addHighlightToCharacter(plr.Character)
+            end
+            data.charConnection = plr.CharacterAdded:Connect(function(char)
+                addHighlightToCharacter(char)
+            end)
+        else
+            removeHighlightFromPlayer(plr)
+            if data.charConnection then
+                data.charConnection:Disconnect()
+                data.charConnection = nil
+            end
+        end
+    end)
 
-	playerHighlightData[plr] = {
-		toggleObj = toggleObj,
-		charConnection = nil
-	}
+    playerHighlightData[plr] = {
+        toggleObj = toggleObj,
+        charConnection = nil
+    }
 end
 
 local function removePlayerToggle(plr)
-	local data = playerHighlightData[plr]
-	if not data then return end
+    local data = playerHighlightData[plr]
+    if not data then return end
 
-	if data.charConnection then
-		data.charConnection:Disconnect()
-	end
-	-- highlight temizle
-	removeHighlightFromPlayer(plr)
-	-- UI’daki toggle’ı yok et
-	pcall(function() data.toggleObj.ToggleFrame:Destroy() end)
-	playerHighlightData[plr] = nil
+    if data.charConnection then
+        data.charConnection:Disconnect()
+    end
+    removeHighlightFromPlayer(plr)
+    pcall(function() data.toggleObj.ToggleFrame:Destroy() end)
+    playerHighlightData[plr] = nil
 end
 
--- Mevcut oyuncuları ekle
 for _, p in ipairs(Players:GetPlayers()) do
-	addPlayerToggle(p)
+    addPlayerToggle(p)
 end
 
--- Yeni giren oyuncular
 Players.PlayerAdded:Connect(function(plr)
-	task.wait(0.5)
-	addPlayerToggle(plr)
+    task.wait(0.5)
+    addPlayerToggle(plr)
 end)
 
--- Ayrılan oyuncuları temizle
 Players.PlayerRemoving:Connect(function(plr)
-	removePlayerToggle(plr)
+    removePlayerToggle(plr)
 end)
 
 --// ==================== UNLOAD ====================
 function unloadScript()
-	if flying then stopFly() end
-	stopNoclip()
-	if jumpRequestConn then jumpRequestConn:Disconnect() jumpRequestConn = nil end
+    if flying then stopFly() end
+    stopNoclip()
+    if jumpRequestConn then jumpRequestConn:Disconnect() jumpRequestConn = nil end
+    if bhopConn then bhopConn:Disconnect() bhopConn = nil end
 
-	getgenv().SpeedEnabled = false
-	getgenv().AntiSlide = false
-	getgenv().NoclipEnabled = false
-	getgenv().InfiniteJumpEnabled = false
+    getgenv().SpeedEnabled = false
+    getgenv().AntiSlide = false
+    getgenv().NoclipEnabled = false
+    getgenv().InfiniteJumpEnabled = false
+    getgenv().BHopEnabled = false
 
-	if currentHum then currentHum.WalkSpeed = 16 end
-	if currentRoot then 
-		currentRoot.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5) 
-	end
+    if currentHum then currentHum.WalkSpeed = 16 end
+    if currentRoot then 
+        currentRoot.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5) 
+    end
 
-	if mainLoopConn then mainLoopConn:Disconnect() end
-	if flyToggleConn then flyToggleConn:Disconnect() end
-	if charAddedConn then charAddedConn:Disconnect() end
-	if noclipConnection then noclipConnection:Disconnect() end
+    if mainLoopConn then mainLoopConn:Disconnect() end
+    if flyToggleConn then flyToggleConn:Disconnect() end
+    if charAddedConn then charAddedConn:Disconnect() end
+    if noclipConnection then noclipConnection:Disconnect() end
 
-	for _, conn in ipairs(characterConnections) do
-		pcall(function() conn:Disconnect() end)
-	end
+    for _, conn in ipairs(characterConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
 
-	-- Highlight cleanup (tüm verileri sil)
-	for plr, data in pairs(playerHighlightData) do
-		if data.charConnection then data.charConnection:Disconnect() end
-		pcall(function() data.toggleObj.ToggleFrame:Destroy() end)
-	end
-	table.clear(playerHighlightData)
+    for plr, data in pairs(playerHighlightData) do
+        if data.charConnection then data.charConnection:Disconnect() end
+        pcall(function() data.toggleObj.ToggleFrame:Destroy() end)
+    end
+    table.clear(playerHighlightData)
 
-	-- Kavo UI temizleme
-	local targetGui = (gethui and gethui()) or game:GetService("CoreGui")
-	for _, v in pairs(targetGui:GetChildren()) do
-		if v:IsA("ScreenGui") and v.Name == "Kavo" then
-			v:Destroy()
-		end
-	end
+    local targetGui = (gethui and gethui()) or game:GetService("CoreGui")
+    for _, v in pairs(targetGui:GetChildren()) do
+        if v:IsA("ScreenGui") and v.Name == "Kavo" then
+            v:Destroy()
+        end
+    end
 end
 
 --// BAŞLANGIÇ
 if player.Character then
-	setupCharacter(player.Character)
+    setupCharacter(player.Character)
 end
 
 charAddedConn = player.CharacterAdded:Connect(setupCharacter)
 
-print("✅ Kontrol Paneli + Noclip + Infinite Jump + Highlight Yüklendi! (F=Fly | B=Infinite Jump)")
+print("✅ Tüm özellikler yüklendi! (F=Fly | B=Infinite Jump | Boşluk=BHop)")
