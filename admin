@@ -7,10 +7,12 @@
     - Infinite Jump (B tuşu ile toggle, sürekli zıplama)
     - Auto BunnyHop (Boşluk tutarak zemine değdiğinde zıplama)
     - Oyuncu Highlight (UI üzerinden seçim)
+    - Full Bright (Tam Parlaklık)
+    - Vibrant Colors (Sadece UI ile kontrol, doygunluk ve kontrast)
     - Kontrol Paneli UI (Kavo UI)
     - Betiği tamamen kapatma butonu
 
-    Versiyon: Final-Entegre
+    Versiyon: Final-Entegre + FullBright + VibrantColors (Tuş Atamasız)
 ]]--
 
 repeat task.wait() until game:IsLoaded()
@@ -19,6 +21,7 @@ repeat task.wait() until game:IsLoaded()
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 local player = Players.LocalPlayer
 
 --// VARIABLES
@@ -29,6 +32,8 @@ getgenv().FlyEnabled = false
 getgenv().NoclipEnabled = false
 getgenv().InfiniteJumpEnabled = false          -- B tuşu ile kontrol edilecek
 getgenv().BHopEnabled = true                   -- Başlangıçta açık (Auto BunnyHop)
+getgenv().FullBrightEnabled = false            -- Full Bright başlangıçta kapalı
+getgenv().VibrantColorsEnabled = false         -- Vibrant Colors başlangıçta kapalı
 
 --// STATE & CONNECTIONS
 local currentRoot = nil
@@ -39,7 +44,7 @@ local flyToggleConn = nil
 local charAddedConn = nil
 local noclipConnection = nil
 local jumpRequestConn = nil
-local bhopConn = nil           -- BHop için StateChanged bağlantısı
+local bhopConn = nil           
 local bhopSpacePressed = false
 
 --// FLY STATE
@@ -51,9 +56,71 @@ local flyMaxSpeed = 80
 local flyInputBegan = nil
 local flyInputEnded = nil
 
+--// FULL BRIGHT STATE
+local originalLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogEnd = Lighting.FogEnd,
+    GlobalShadows = Lighting.GlobalShadows,
+    Ambient = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    ColorShift_Top = Lighting.ColorShift_Top,
+    ColorShift_Bottom = Lighting.ColorShift_Bottom,
+    EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+    EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+}
+
+--// VIBRANT COLORS STATE
+local originalColorCorrection = {
+    Enabled = Lighting.ColorCorrection.Enabled,
+    Saturation = Lighting.ColorCorrection.Saturation,
+    Contrast = Lighting.ColorCorrection.Contrast,
+}
+
+local function applyVibrantColors()
+    Lighting.ColorCorrection.Enabled = true
+    Lighting.ColorCorrection.Saturation = 0.8
+    Lighting.ColorCorrection.Contrast = 0.4
+end
+
+local function removeVibrantColors()
+    Lighting.ColorCorrection.Enabled = originalColorCorrection.Enabled
+    Lighting.ColorCorrection.Saturation = originalColorCorrection.Saturation
+    Lighting.ColorCorrection.Contrast = originalColorCorrection.Contrast
+end
+
+local function applyFullBright()
+    if getgenv().FullBrightEnabled then
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 100000
+        Lighting.GlobalShadows = false
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+        Lighting.ColorShift_Top = Color3.fromRGB(0, 0, 0)
+        Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
+        Lighting.EnvironmentDiffuseScale = 1
+        Lighting.EnvironmentSpecularScale = 1
+    end
+end
+
+local function revertFullBright()
+    if Lighting then
+        Lighting.Brightness = originalLighting.Brightness
+        Lighting.ClockTime = originalLighting.ClockTime
+        Lighting.FogEnd = originalLighting.FogEnd
+        Lighting.GlobalShadows = originalLighting.GlobalShadows
+        Lighting.Ambient = originalLighting.Ambient
+        Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
+        Lighting.ColorShift_Top = originalLighting.ColorShift_Top
+        Lighting.ColorShift_Bottom = originalLighting.ColorShift_Bottom
+        Lighting.EnvironmentDiffuseScale = originalLighting.EnvironmentDiffuseScale
+        Lighting.EnvironmentSpecularScale = originalLighting.EnvironmentSpecularScale
+    end
+end
+
 --// ==================== AUTO BUNNYHOP ====================
 local function setupBHop()
-    -- Mevcut bağlantıyı temizle
     if bhopConn then
         bhopConn:Disconnect()
         bhopConn = nil
@@ -72,7 +139,6 @@ local function setupBHop()
     end
 end
 
--- Space basılı tutma durumunu izle (BHop için)
 UIS.InputBegan:Connect(function(input, gpe)
     if input.KeyCode == Enum.KeyCode.Space and not gpe then
         bhopSpacePressed = true
@@ -101,12 +167,10 @@ local function setupInfiniteJump()
     end
 end
 
--- B tuşu - Infinite Jump toggle
 UIS.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Enum.KeyCode.B then
         getgenv().InfiniteJumpEnabled = not getgenv().InfiniteJumpEnabled
-        print("Infinite Jump: " .. tostring(getgenv().InfiniteJumpEnabled))
         setupInfiniteJump()
     end
 end)
@@ -253,7 +317,7 @@ local function applyMovementSettings(char)
     end
 
     setupInfiniteJump()
-    setupBHop()                      -- BHop bağlantısını kur
+    setupBHop()                      
 
     local diedConn = hum.Died:Connect(function()
         currentHum = nil
@@ -355,6 +419,24 @@ end)
 Sec:NewToggle("Auto BunnyHop", "Boşluk tutarken zemine değdiğinde zıpla", function(state)
     getgenv().BHopEnabled = state
     setupBHop()
+end)
+
+Sec:NewToggle("Full Bright", "Tam parlaklık (gece/gündüz fark etmez)", function(state)
+    getgenv().FullBrightEnabled = state
+    if state then
+        applyFullBright()
+    else
+        revertFullBright()
+    end
+end)
+
+Sec:NewToggle("Vibrant Colors", "Renkleri canlandırır (doygunluk & kontrast)", function(state)
+    getgenv().VibrantColorsEnabled = state
+    if state then
+        applyVibrantColors()
+    else
+        removeVibrantColors()
+    end
 end)
 
 Sec:NewSlider("Fly Hızı", "Uçuş hızı (20-200)", 200, 20, function(s)
@@ -463,6 +545,10 @@ function unloadScript()
     getgenv().NoclipEnabled = false
     getgenv().InfiniteJumpEnabled = false
     getgenv().BHopEnabled = false
+    getgenv().FullBrightEnabled = false
+    revertFullBright()
+    getgenv().VibrantColorsEnabled = false
+    removeVibrantColors()
 
     if currentHum then currentHum.WalkSpeed = 16 end
     if currentRoot then 
@@ -499,4 +585,4 @@ end
 
 charAddedConn = player.CharacterAdded:Connect(setupCharacter)
 
-print("✅ Tüm özellikler yüklendi! (F=Fly | B=Infinite Jump | Boşluk=BHop)")
+print("✅ Tüm özellikler yüklendi! (F=Fly | B=Infinite Jump | Boşluk=BHop | UI=Vibrant Colors | Full Bright eklendi)")
